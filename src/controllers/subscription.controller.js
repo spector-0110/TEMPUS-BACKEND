@@ -184,10 +184,15 @@ class SubscriptionController {
 
   // Private methods
   async fetchPlansFromDB() {
-    return await prisma.subscriptionPlan.findMany({
-      where: { isActive: true },
-      orderBy: { monthlyPrice: 'asc' }
-    });
+    try {
+      return await prisma.subscriptionPlan.findMany({
+        where: { isActive: true },
+        orderBy: { monthlyPrice: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error in fetchPlansFromDB:', error);
+      throw error;
+    }
   }
 
   async updateCache(plans) {
