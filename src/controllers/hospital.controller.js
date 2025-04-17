@@ -15,7 +15,7 @@ class HospitalController {
 
   // Helper method to validate contact info
   validateContactInfo(contactInfo) {
-    const requiredFields = ['phone', 'email'];
+    const requiredFields = ['phone'];
     const missingFields = requiredFields.filter(field => !contactInfo[field]);
     
     if (missingFields.length > 0) {
@@ -39,7 +39,7 @@ class HospitalController {
 
   async hospitalExistsBySupabaseId(supabaseUserId) {
     const hospital = await prisma.hospital.findUnique({
-      where: { supabaseUserId },
+      where: { supabaseUserId:supabaseUserId },
       select: { id: true }
     });
     return Boolean(hospital);
