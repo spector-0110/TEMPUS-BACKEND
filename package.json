@@ -5,7 +5,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "db:seed": "prisma db seed"
   },
   "keywords": [],
   "author": "",
@@ -25,5 +26,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

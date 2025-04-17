@@ -6,6 +6,7 @@ const redis = require('./src/config/redis.config');
 const rabbitmq = require('./src/config/rabbitmq.config');
 const supabase = require('./src/config/supabase.config');
 const { testConnection } = require('./src/services/database.service');
+const subscriptionRoutes = require('./src/routes/subscription.routes');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -14,6 +15,11 @@ const PORT = process.env.PORT || 8000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Import routes
+
+// Routes
+app.use('/api/subscriptions', subscriptionRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
