@@ -1,11 +1,11 @@
-const rabbitmq = require('../config/rabbitmq.config');
-const redis = require('../config/redis.config');
+const rabbitmqService = require('../services/rabbitmq.service');
+const redisService = require('../services/redis.service');
 
 class MessageProcessor {
   async initialize() {
     // Create queues
-    await rabbitmq.createQueue('tasks');
-    await rabbitmq.createQueue('notifications');
+    await rabbitmqService.createQueue('tasks');
+    await rabbitmqService.createQueue('notifications');
 
     // Set up consumers
     await this.setupTaskConsumer();
@@ -13,33 +13,27 @@ class MessageProcessor {
   }
 
   async setupTaskConsumer() {
-    await rabbitmq.consumeQueue('tasks', async (data) => {
+    await rabbitmqService.consumeQueue('tasks', async (data) => {
       // Process task and store result in Redis
       const taskId = data.id;
-      await redis.set(`task:${taskId}`, JSON.stringify(data));
-      
-      // Example: Set expiry for task data (24 hours)
-      await redis.expire(`task:${taskId}`, 24 * 60 * 60);
+      await redisService.setCache(`task:${taskId}`, data, 24 * 60 * 60); // 24 hours expiry
     });
   }
 
   async setupNotificationConsumer() {
-    await rabbitmq.consumeQueue('notifications', async (data) => {
+    await rabbitmqService.consumeQueue('notifications', async (data) => {
       // Store notification in Redis
       const notificationId = data.id;
-      await redis.set(`notification:${notificationId}`, JSON.stringify(data));
-      
-      // Example: Set expiry for notifications (7 days)
-      await redis.expire(`notification:${notificationId}`, 7 * 24 * 60 * 60);
+      await redisService.setCache(`notification:${notificationId}`, data, 7 * 24 * 60 * 60); // 7 days expiry
     });
   }
 
   async publishTask(taskData) {
-    await rabbitmq.publishToQueue('tasks', taskData);
+    await rabbitmqService.publishToQueue('tasks', taskData);
   }
 
   async publishNotification(notificationData) {
-    await rabbitmq.publishToQueue('notifications', notificationData);
+    await rabbitmqService.publishToQueue('notifications', notificationData);
   }
 }
 
