@@ -22,11 +22,11 @@ class HospitalController {
       throw new Error(`Missing required contact fields: ${missingFields.join(', ')}`);
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(contactInfo.email)) {
-      throw new Error('Invalid email format in contact info');
-    }
+    // // Validate email format
+    // const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // if (!emailRegex.test(contactInfo.email)) {
+    //   throw new Error('Invalid email format in contact info');
+    // }
 
     // Validate phone format (basic validation)
     const phoneRegex = /^\+?[\d\s-]{8,}$/;
@@ -39,7 +39,7 @@ class HospitalController {
 
   async hospitalExistsBySupabaseId(supabaseUserId) {
     const hospital = await prisma.hospital.findUnique({
-      where: { supabaseUserId:supabaseUserId },
+      where: { supabaseUserId :supabaseUserId },
       select: { id: true }
     });
     return Boolean(hospital);
@@ -49,13 +49,16 @@ class HospitalController {
     try {
       const supabaseUserId = req.user.id;
       const hospitalData = req.body;
+      const addressObj = hospitalData.address || {};
+      const addressString = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}, ${addressObj.pincode}, ${addressObj.country}`;
+
 
       if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
         return res.status(400).json({ error: 'Hospital already exists for this user' });
       }
 
       // Validate required fields
-      const requiredFields = ['name', 'subdomain', 'adminEmail', 'contactInfo'];
+      const requiredFields = ['name', 'subdomain', 'contactInfo'];
       const missingFields = requiredFields.filter(field => !hospitalData[field]);
       if (missingFields.length > 0) {
         return res.status(400).json({ 
@@ -72,13 +75,13 @@ class HospitalController {
         });
       }
 
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(hospitalData.adminEmail)) {
-        return res.status(400).json({
-          error: 'Invalid email format'
-        });
-      }
+      // // Validate email format
+      // const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      // if (!emailRegex.test(hospitalData.adminEmail)) {
+      //   return res.status(400).json({
+      //     error: 'Invalid email format'
+      //   });
+      // }
 
       // Validate contact info
       try {
@@ -96,7 +99,7 @@ class HospitalController {
             select: { id: true }
           }),
           tx.hospital.findUnique({ 
-            where: { adminEmail: hospitalData.adminEmail },
+            where: { adminEmail: req.user.email },
             select: { id: true }
           })
         ]);
@@ -114,9 +117,9 @@ class HospitalController {
             supabaseUserId,
             name: hospitalData.name,
             subdomain: hospitalData.subdomain.toLowerCase(),
-            adminEmail: hospitalData.adminEmail.toLowerCase(),
+            adminEmail:req.user.email,
             gstin: hospitalData.gstin,
-            address: hospitalData.address,
+            address: addressString,
             contactInfo: hospitalData.contactInfo,
             logo: hospitalData.logo,
             themeColor: hospitalData.themeColor || '#2563EB', // Default theme color
@@ -126,7 +129,7 @@ class HospitalController {
         // Send welcome email through queue
         await messageProcessor.publishNotification({
           type: 'EMAIL',
-          to: hospital.adminEmail,
+          to: req.user.email,
           subject: 'Welcome to Swasthify',
           content: `Welcome to Swasthify! Your hospital ${hospital.name} has been successfully registered.`
         });
