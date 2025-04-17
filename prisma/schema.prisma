@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AppointmentStatus {
+  booked
+  cancelled
+  completed
+  missed
+}
+
+enum NotificationStatus {
+  sent
+  not_sent
+}
+
+enum ScheduleStatus {
+  active
+  inactive
+}
+
+enum SubscriptionStatus {
+  active
+  expired
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  unpaid
+}
+
+model Hospital {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name         String
+  adminEmail   String    @unique @map("admin_email")
+  adminPassword String   @map("admin_password")
+  subdomain    String    @unique
+  gstin        String?
+  address      String?
+  contactInfo  Json?     @map("contact_info")
+  logo         String?
+  themeColor   String?   @map("theme_color")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  doctors      Doctor[]
+  appointments Appointment[]
+  subscriptions HospitalSubscription[]
+
+  @@map("hospitals")
+}
+
+model SubscriptionPlan {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name         String
+  description  String?
+  maxDoctors   Int       @map("max_doctors")
+  monthlyPrice Decimal?  @map("monthly_price")
+  yearlyPrice  Decimal?  @map("yearly_price")
+  features     Json?
+  isActive     Boolean   @default(true) @map("is_active")
+
+  // Relations
+  hospitalSubscriptions HospitalSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model HospitalSubscription {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hospitalId    String    @map("hospital_id") @db.Uuid
+  planId        String    @map("plan_id") @db.Uuid
+  startDate     DateTime  @map("start_date") @db.Date
+  endDate       DateTime  @map("end_date") @db.Date
+  status        SubscriptionStatus
+  paymentStatus PaymentStatus @map("payment_status")
+  smsCredits    Int       @default(0) @map("sms_credits")
+  emailCredits  Int       @default(0) @map("email_credits")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  hospital      Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  plan         SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@map("hospital_subscriptions")
+}
+
+model Doctor {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hospitalId     String    @map("hospital_id") @db.Uuid
+  name          String
+  specialization String?
+  qualification  String?
+  experience    Int?
+  age          Int?
+  phone        String?
+  email        String?
+  photo        String?
+  aadhar       String?
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  // Relations
+  hospital     Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  schedules    DoctorSchedule[]
+  appointments Appointment[]
+  visitNotes   VisitNote[]
+
+  @@map("doctors")
+}
+
+model DoctorSchedule {
+  id                      String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  doctorId               String    @map("doctor_id") @db.Uuid
+  hospitalId             String    @map("hospital_id") @db.Uuid
+  dayOfWeek             Int       @map("day_of_week")
+  startTime             DateTime? @map("start_time") @db.Time
+  endTime               DateTime? @map("end_time") @db.Time
+  lunchTime             DateTime? @map("lunch_time") @db.Time
+  avgConsultationTimeMinutes Int? @map("avg_consultation_time_minutes")
+  status                ScheduleStatus @default(active)
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  doctor                Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@map("doctor_schedules")
+}
+
+model Appointment {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hospitalId       String    @map("hospital_id") @db.Uuid
+  doctorId         String    @map("doctor_id") @db.Uuid
+  patientName      String    @map("patient_name")
+  mobile          String
+  age             Int?
+  appointmentDate DateTime  @map("appointment_date") @db.Date
+  startTime       DateTime? @map("start_time") @db.Time
+  endTime         DateTime? @map("end_time") @db.Time
+  status          AppointmentStatus @default(booked)
+  notificationStatus NotificationStatus @default(not_sent) @map("notification_status")
+  paymentStatus    PaymentStatus @default(pending) @map("payment_status")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  hospital        Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  doctor          Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  visitNotes      VisitNote[]
+
+  @@map("appointments")
+}
+
+model VisitNote {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  appointmentId  String    @map("appointment_id") @db.Uuid
+  doctorId       String    @map("doctor_id") @db.Uuid
+  patientName    String?   @map("patient_name")
+  note          String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  appointment    Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  doctor        Doctor      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@map("visit_notes")
+}
