@@ -56,24 +56,40 @@ class SubscriptionController {
       const planData = req.body;
 
       // Validate required fields
-      if (!planData.name || !planData.maxDoctors || !planData.monthlyPrice) {
+      if (!this.validatePlanData(planData)) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
-      // Create plan in database
-      const newPlan = await prisma.subscriptionPlan.create({
-        data: planData
+      // Format features if provided
+      if (planData.features && Array.isArray(planData.features)) {
+        planData.features = JSON.stringify(planData.features);
+      }
+
+      // Create plan in database with transaction
+      const newPlan = await prisma.$transaction(async (prismaClient) => {
+        const plan = await prismaClient.subscriptionPlan.create({
+          data: planData
+        });
+
+        // Fetch all active plans to update cache
+        const allPlans = await prismaClient.subscriptionPlan.findMany({
+          where: { isActive: true },
+          orderBy: { monthlyPrice: 'asc' }
+        });
+
+        // Update Redis cache
+        await this.updateCache(allPlans);
+
+        return plan;
       });
 
-      // Notify all servers about the update
-      await rabbitmqService.publishToQueue('subscription_updates', {
-        type: 'PLAN_CREATED',
-        plan: newPlan
-      });
+      // Notify other servers about the update through RabbitMQ
+      await this.notifyPlanUpdate('PLAN_CREATED', newPlan);
 
       return res.status(201).json(newPlan);
     } catch (error) {
       console.error('Error creating subscription plan:', error);
+      await this.invalidateCache();
       return res.status(500).json({ error: 'Failed to create subscription plan' });
     }
   }
@@ -83,20 +99,45 @@ class SubscriptionController {
       const { id } = req.params;
       const updateData = req.body;
 
-      const updatedPlan = await prisma.subscriptionPlan.update({
-        where: { id },
-        data: updateData
+      // Validate update data
+      if (!this.validatePlanData(updateData, true)) {
+        return res.status(400).json({ error: 'Invalid update data' });
+      }
+
+      // Format features if provided
+      if (updateData.features && Array.isArray(updateData.features)) {
+        updateData.features = JSON.stringify(updateData.features);
+      }
+
+      // Update plan in database with transaction
+      const updatedPlan = await prisma.$transaction(async (prismaClient) => {
+        const plan = await prismaClient.subscriptionPlan.update({
+          where: { id },
+          data: updateData
+        });
+
+        // Fetch all active plans to update cache
+        const allPlans = await prismaClient.subscriptionPlan.findMany({
+          where: { isActive: true },
+          orderBy: { monthlyPrice: 'asc' }
+        });
+
+        // Update Redis cache
+        await this.updateCache(allPlans);
+
+        return plan;
       });
 
-      // Notify all servers about the update
-      await rabbitmqService.publishToQueue('subscription_updates', {
-        type: 'PLAN_UPDATED',
-        plan: updatedPlan
-      });
+      // Notify other servers about the update
+      await this.notifyPlanUpdate('PLAN_UPDATED', updatedPlan);
 
       return res.json(updatedPlan);
     } catch (error) {
       console.error('Error updating subscription plan:', error);
+      await this.invalidateCache();
+      if (error.code === 'P2025') {
+        return res.status(404).json({ error: 'Subscription plan not found' });
+      }
       return res.status(500).json({ error: 'Failed to update subscription plan' });
     }
   }
@@ -105,21 +146,38 @@ class SubscriptionController {
     try {
       const { id } = req.params;
 
-      // Soft delete by setting isActive to false
-      const deletedPlan = await prisma.subscriptionPlan.update({
-        where: { id },
-        data: { isActive: false }
+      // Soft delete with transaction
+      const deletedPlan = await prisma.$transaction(async (prismaClient) => {
+        const plan = await prismaClient.subscriptionPlan.update({
+          where: { id },
+          data: { isActive: false }
+        });
+
+        // Fetch all remaining active plans
+        const allPlans = await prismaClient.subscriptionPlan.findMany({
+          where: { isActive: true },
+          orderBy: { monthlyPrice: 'asc' }
+        });
+
+        // Update Redis cache
+        await this.updateCache(allPlans);
+
+        return plan;
       });
 
-      // Notify all servers about the update
-      await rabbitmqService.publishToQueue('subscription_updates', {
-        type: 'PLAN_DELETED',
-        planId: id
-      });
+      // Notify other servers about the deletion
+      await this.notifyPlanUpdate('PLAN_DELETED', { id, isActive: false });
 
-      return res.json({ message: 'Plan deactivated successfully' });
+      return res.json({ 
+        message: 'Plan deactivated successfully',
+        planId: deletedPlan.id 
+      });
     } catch (error) {
       console.error('Error deleting subscription plan:', error);
+      await this.invalidateCache();
+      if (error.code === 'P2025') {
+        return res.status(404).json({ error: 'Subscription plan not found' });
+      }
       return res.status(500).json({ error: 'Failed to delete subscription plan' });
     }
   }
@@ -138,6 +196,7 @@ class SubscriptionController {
       console.log('Cache updated successfully');
     } catch (error) {
       console.error('Error updating cache:', error);
+      throw error; // Propagate error to trigger rollback in transaction
     }
   }
 
@@ -155,6 +214,37 @@ class SubscriptionController {
       }
     } catch (error) {
       console.error('Error refreshing cache:', error);
+    }
+  }
+
+  async invalidateCache() {
+    try {
+      await redisService.invalidateCache(this.CACHE_KEY);
+    } catch (error) {
+      console.error('Error invalidating cache:', error);
+    }
+  }
+
+  validatePlanData(data, isUpdate = false) {
+    // For updates, we don't require all fields
+    if (isUpdate) {
+      return Object.keys(data).length > 0;
+    }
+    
+    return data.name && 
+           data.maxDoctors && 
+           (data.monthlyPrice !== undefined || data.yearlyPrice !== undefined);
+  }
+
+  async notifyPlanUpdate(type, plan) {
+    try {
+      await rabbitmqService.publishToQueue('subscription_updates', {
+        type,
+        plan,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error notifying plan update:', error);
     }
   }
 
