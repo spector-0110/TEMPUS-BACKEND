@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase.config');
+const { prisma } = require('../services/database.service');
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -14,9 +15,24 @@ const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
+    // Look up hospital ID if this isn't the initial registration
+    if (req.path !== '/initial-details') {
+      const hospital = await prisma.hospital.findUnique({
+        where: { supabaseUserId: user.id },
+        select: { id: true }
+      });
+      
+      if (!hospital) {
+        return res.status(404).json({ error: 'Hospital not found for this user' });
+      }
+      
+      user.hospital_id = hospital.id;
+    }
+
     req.user = user;
     next();
   } catch (error) {
+    console.error('Auth middleware error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

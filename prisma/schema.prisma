@@ -39,26 +39,24 @@ enum PaymentStatus {
 }
 
 model Hospital {
-  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name         String
-  adminEmail   String    @unique @map("admin_email")
-  adminPassword String   @map("admin_password")
-  subdomain    String    @unique
-  gstin        String?
-  address      String?
-  contactInfo  Json?     @map("contact_info")
-  logo         String?
-  themeColor   String?   @map("theme_color")
-  createdAt    DateTime  @default(now()) @map("created_at")
-
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  supabaseUserId String?   @unique @map("supabase_user_id") @db.Uuid
+  name           String
+  adminEmail     String    @unique @map("admin_email")
+  subdomain      String    @unique
+  gstin          String?
+  address        String?
+  contactInfo    Json?     @map("contact_info")
+  logo           String?
+  themeColor     String?   @map("theme_color")
+  createdAt      DateTime  @default(now()) @map("created_at")
   // Relations
-  doctors      Doctor[]
-  appointments Appointment[]
-  subscriptions HospitalSubscription[]
-
+  doctors        Doctor[]
+  appointments   Appointment[]
+  subscriptions  HospitalSubscription[]
+  
   @@map("hospitals")
 }
-
 model SubscriptionPlan {
   id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   name         String

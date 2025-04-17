@@ -3,7 +3,10 @@ const router = express.Router();
 const hospitalController = require('../controllers/hospital.controller');
 const authMiddleware = require('../middleware/auth.middleware');
 
-// Apply auth middleware to all routes
+// Initial registration route with auth
+router.post('/initial-details', authMiddleware, hospitalController.createHospital);
+
+// Apply auth middleware to all other routes
 router.use(authMiddleware);
 
 // Hospital dashboard and details

@@ -6,6 +6,7 @@ const rabbitmq = require('./src/config/rabbitmq.config');
 const supabase = require('./src/config/supabase.config');
 const { testConnection, disconnect } = require('./src/services/database.service');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
+const hospitalRoutes = require('./src/routes/hospital.routes');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -16,6 +17,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/hospitals', hospitalRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
