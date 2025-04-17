@@ -3,17 +3,19 @@ const router = express.Router();
 const hospitalController = require('../controllers/hospital.controller');
 const authMiddleware = require('../middleware/auth.middleware');
 
-// Initial registration route with auth
+// Public routes (if any)
+
+// Initial registration route - needs auth but not hospital_id
 router.post('/initial-details', authMiddleware, hospitalController.createHospital);
 
-// Apply auth middleware to all other routes
+// Protected routes - need both auth and hospital_id
 router.use(authMiddleware);
 
-// Hospital dashboard and details
-router.get('/dashboard', hospitalController.getDashboardStats);
+// Hospital information
 router.get('/details', hospitalController.getHospitalDetails);
+router.get('/dashboard', hospitalController.getDashboardStats);
 
-// OTP verification flow
+// Hospital editing flow
 router.post('/request-edit-verification', hospitalController.requestEditVerification);
 router.post('/verify-edit-otp', hospitalController.verifyEditOTP);
 router.put('/update', hospitalController.updateHospitalDetails);

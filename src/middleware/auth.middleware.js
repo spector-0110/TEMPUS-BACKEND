@@ -15,8 +15,11 @@ const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
-    // Look up hospital ID if this isn't the initial registration
-    if (req.path !== '/initial-details') {
+    // Check if this is the initial registration route
+    const isInitialRegistration = req.path.endsWith('/initial-details');
+    
+    // Look up hospital ID for all routes except initial registration
+    if (!isInitialRegistration) {
       const hospital = await prisma.hospital.findUnique({
         where: { supabaseUserId: user.id },
         select: { id: true }

@@ -1,12 +1,12 @@
 const rabbitmqService = require('../services/rabbitmq.service');
 const redisService = require('../services/redis.service');
+const mailService = require('../services/mail.service');
 
 class MessageProcessor {
   async initialize() {
     // Create queues
     await rabbitmqService.createQueue('tasks');
     await rabbitmqService.createQueue('notifications');
-    await rabbitmqService.createQueue('email_notifications');
     await rabbitmqService.createQueue('sms_notifications');
 
     // Set up consumers
@@ -32,14 +32,27 @@ class MessageProcessor {
 
   async setupEmailConsumer() {
     await rabbitmqService.consumeQueue('email_notifications', async (data) => {
-      // Here you would integrate with your email service (e.g., SendGrid, AWS SES)
-      console.log('Processing email notification:', data);
-      // Store notification status in Redis
-      await redisService.setCache(`email:${Date.now()}`, {
-        status: 'sent',
-        data,
-        timestamp: new Date().toISOString()
-      }, 7 * 24 * 60 * 60); // 7 days retention
+      try {
+        // Handle OTP emails specially
+        if (data.subject?.includes('OTP')) {
+          const otp = data.content.match(/\d{6}/)[0];
+          await mailService.sendOTPEmail(data.to, otp, data.hospitalId);
+        } else {
+          // Handle regular emails
+          await mailService.sendMail(data.to, data.subject, data.content, data.hospitalId);
+        }
+      } catch (error) {
+        console.error('Error processing email:', error);
+        // Log failure
+        await redisService.setCache(`email:error:${Date.now()}`, {
+          status: 'failed',
+          data,
+          error: error.message,
+          timestamp: new Date().toISOString()
+        }, 7 * 24 * 60 * 60);
+
+        throw error; // Allow RabbitMQ to requeue the message
+      }
     });
   }
 

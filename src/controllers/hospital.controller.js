@@ -1,8 +1,41 @@
 const { prisma } = require('../services/database.service');
 const otpService = require('../services/otp.service');
+const mailService = require('../services/mail.service');
 const messageProcessor = require('../queue/messageProcessor');
 
 class HospitalController {
+  constructor() {
+    this.createHospital = this.createHospital.bind(this);
+    this.getHospitalDetails = this.getHospitalDetails.bind(this);
+    this.requestEditVerification = this.requestEditVerification.bind(this);
+    this.verifyEditOTP = this.verifyEditOTP.bind(this);
+    this.updateHospitalDetails = this.updateHospitalDetails.bind(this);
+    this.getDashboardStats = this.getDashboardStats.bind(this);
+  }
+
+  // Helper method to validate contact info
+  validateContactInfo(contactInfo) {
+    const requiredFields = ['phone', 'email'];
+    const missingFields = requiredFields.filter(field => !contactInfo[field]);
+    
+    if (missingFields.length > 0) {
+      throw new Error(`Missing required contact fields: ${missingFields.join(', ')}`);
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(contactInfo.email)) {
+      throw new Error('Invalid email format in contact info');
+    }
+
+    // Validate phone format (basic validation)
+    const phoneRegex = /^\+?[\d\s-]{8,}$/;
+    if (!phoneRegex.test(contactInfo.phone)) {
+      throw new Error('Invalid phone format in contact info');
+    }
+
+    return true;
+  }
 
   async hospitalExistsBySupabaseId(supabaseUserId) {
     const hospital = await prisma.hospital.findUnique({
@@ -17,12 +50,12 @@ class HospitalController {
       const supabaseUserId = req.user.id;
       const hospitalData = req.body;
 
-      if(await this.hospitalExistsBySupabaseId(supabaseUserId)) {
+      if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
         return res.status(400).json({ error: 'Hospital already exists for this user' });
       }
 
       // Validate required fields
-      const requiredFields = ['name', 'subdomain', 'adminEmail', 'contact_info'];
+      const requiredFields = ['name', 'subdomain', 'adminEmail', 'contactInfo'];
       const missingFields = requiredFields.filter(field => !hospitalData[field]);
       if (missingFields.length > 0) {
         return res.status(400).json({ 
@@ -47,12 +80,25 @@ class HospitalController {
         });
       }
 
+      // Validate contact info
+      try {
+        this.validateContactInfo(hospitalData.contactInfo);
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
       // Use transaction to ensure data consistency
       const newHospital = await prisma.$transaction(async (tx) => {
         // Check unique constraints within transaction
         const [existingSubdomain, existingEmail] = await Promise.all([
-          tx.hospital.findUnique({ where: { subdomain: hospitalData.subdomain } }),
-          tx.hospital.findUnique({ where: { adminEmail: hospitalData.adminEmail } })
+          tx.hospital.findUnique({ 
+            where: { subdomain: hospitalData.subdomain },
+            select: { id: true }
+          }),
+          tx.hospital.findUnique({ 
+            where: { adminEmail: hospitalData.adminEmail },
+            select: { id: true }
+          })
         ]);
 
         if (existingSubdomain) {
@@ -67,17 +113,17 @@ class HospitalController {
           data: {
             supabaseUserId,
             name: hospitalData.name,
-            subdomain: hospitalData.subdomain,
-            adminEmail: hospitalData.adminEmail,
+            subdomain: hospitalData.subdomain.toLowerCase(),
+            adminEmail: hospitalData.adminEmail.toLowerCase(),
             gstin: hospitalData.gstin,
             address: hospitalData.address,
             contactInfo: hospitalData.contactInfo,
             logo: hospitalData.logo,
-            themeColor: hospitalData.themeColor,
+            themeColor: hospitalData.themeColor || '#2563EB', // Default theme color
           },
         });
 
-        // Send welcome email
+        // Send welcome email through queue
         await messageProcessor.publishNotification({
           type: 'EMAIL',
           to: hospital.adminEmail,
@@ -94,14 +140,21 @@ class HospitalController {
       });
     } catch (error) {
       console.error('Error creating hospital:', error);
-      if (error.message === 'Subdomain already in use' || error.message === 'Admin email already registered') {
+      
+      // Handle known errors
+      if (error.message === 'Subdomain already in use' || 
+          error.message === 'Admin email already registered') {
         return res.status(400).json({ error: error.message });
       }
+      
+      // Handle Prisma unique constraint violations
       if (error.code === 'P2002') {
+        const field = error.meta?.target?.[0] || 'field';
         return res.status(400).json({ 
-          error: 'A hospital with this subdomain or admin email already exists' 
+          error: `A hospital with this ${field} already exists` 
         });
       }
+
       return res.status(500).json({ error: 'Internal server error' });
     }
   }
@@ -139,18 +192,13 @@ class HospitalController {
       // Generate OTP
       const otp = await otpService.generateOTP(hospitalId);
 
-      // Send OTP via email
-      await messageProcessor.publishNotification({
-        type: 'EMAIL',
-        to: hospital.adminEmail,
-        subject: 'Hospital Edit Verification OTP',
-        content: `Your OTP for editing hospital details is: ${otp}. This OTP will expire in 5 minutes.`
-      });
+      // Send OTP via email directly instead of using message queue
+      await mailService.sendOTPEmail(hospital.adminEmail, otp, hospitalId);
 
       return res.json({ message: 'OTP sent successfully' });
     } catch (error) {
       console.error('Error requesting edit verification:', error);
-      return res.status(500).json({ error: 'Internal server error' });
+      return res.status(500).json({ error: 'Failed to send OTP' });
     }
   }
 
@@ -279,7 +327,7 @@ class HospitalController {
                 maxDoctors: true,
                 features: true
               }
-            } 
+            }
           }
         })
       ]);

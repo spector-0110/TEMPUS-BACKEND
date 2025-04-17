@@ -5,6 +5,7 @@ const redis = require('./src/config/redis.config');
 const rabbitmq = require('./src/config/rabbitmq.config');
 const supabase = require('./src/config/supabase.config');
 const { testConnection, disconnect } = require('./src/services/database.service');
+const messageProcessor = require('./src/queue/messageProcessor');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
 
@@ -35,6 +36,9 @@ async function initializeServices() {
     // Connect to RabbitMQ
     await rabbitmq.connect();
     
+    // Initialize message processor
+    await messageProcessor.initialize();
+    
     // Test Redis connection
     await redis.ping();
     
@@ -54,6 +58,13 @@ async function shutdown() {
   try {
     // Disconnect database
     await disconnect();
+    
+    // Close RabbitMQ connection
+    const rabbitmqConnection = rabbitmq.getConnection();
+    if (rabbitmqConnection) {
+      await rabbitmqConnection.close();
+      console.log('RabbitMQ connection closed');
+    }
     
     // Close server
     server.close(() => {
