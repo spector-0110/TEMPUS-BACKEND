@@ -11,4 +11,9 @@ router.get('/plans', (req, res) => subscriptionController.getAllPlans(req, res))
 // Protected route for refreshing cache - only accessible by authenticated users
 router.post('/refresh-cache', authMiddleware, (req, res) => subscriptionController.refreshCache(req, res));
 
+// Admin routes - protected by authentication
+router.post('/plans', authMiddleware, (req, res) => subscriptionController.createPlan(req, res));
+router.put('/plans/:id', authMiddleware, (req, res) => subscriptionController.updatePlan(req, res));
+router.delete('/plans/:id', authMiddleware, (req, res) => subscriptionController.deletePlan(req, res));
+
 module.exports = router;
