@@ -33,11 +33,17 @@ class MessageProcessor {
       maxLength: 100000
     });
 
+    await this.rabbitmqService.createQueue('whatsapp_notifications', {
+      deadLetterExchange: true,
+      maxLength: 100000
+    });
+
     // Set up consumers
     await this.setupTaskConsumer();
     await this.setupNotificationConsumer();
     await this.setupEmailConsumer();
     await this.setupSMSConsumer();
+    await this.setupWhatsAppConsumer();
   }
 
   async setupTaskConsumer() {
@@ -107,6 +113,22 @@ class MessageProcessor {
       console.log('Processing SMS notification:', data);
       // Store notification status in Redis
       await redisService.setCache(`sms:${Date.now()}`, {
+        status: 'sent',
+        data,
+        timestamp: new Date().toISOString()
+      }, 7 * 24 * 60 * 60); // 7 days retention
+    }, {
+      maxRetries: 3,
+      prefetch: 10
+    });
+  }
+
+  async setupWhatsAppConsumer() {
+    await this.rabbitmqService.consumeQueue('whatsapp_notifications', async (data) => {
+      // Here you would integrate with your WhatsApp service (e.g., Twilio, MessageBird)
+      console.log('Processing WhatsApp notification:', data);
+      // Store notification status in Redis
+      await redisService.setCache(`whatsapp:${Date.now()}`, {
         status: 'sent',
         data,
         timestamp: new Date().toISOString()

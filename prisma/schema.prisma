@@ -27,9 +27,10 @@ enum ScheduleStatus {
 }
 
 enum SubscriptionStatus {
-  active
-  expired
-  cancelled
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PENDING
 }
 
 enum PaymentStatus {
@@ -79,7 +80,7 @@ model HospitalSubscription {
   planId        String    @map("plan_id") @db.Uuid
   startDate     DateTime  @map("start_date") @db.Date
   endDate       DateTime  @map("end_date") @db.Date
-  status        SubscriptionStatus
+  status        SubscriptionStatus @default(PENDING)
   paymentStatus PaymentStatus @map("payment_status")
   smsCredits    Int       @default(0) @map("sms_credits")
   emailCredits  Int       @default(0) @map("email_credits")

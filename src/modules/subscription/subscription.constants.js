@@ -1,8 +1,8 @@
 const SUBSCRIPTION_STATUS = {
-  ACTIVE: 'active',
-  EXPIRED: 'expired',
-  CANCELLED: 'cancelled',
-  PENDING: 'pending'
+  ACTIVE: 'ACTIVE',
+  EXPIRED: 'EXPIRED',
+  CANCELLED: 'CANCELLED',
+  PENDING: 'PENDING'
 };
 
 const BILLING_CYCLE = {

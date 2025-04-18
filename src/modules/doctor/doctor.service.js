@@ -1,9 +1,10 @@
 const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const mailService = require('../../services/mail.service');
+const rabbitmqService = require('../../services/rabbitmq.service');
 const doctorValidator = require('./doctor.validator');
 const subscriptionService = require('../subscription/subscription.service');
-const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE } = require('./doctor.constants');
+const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS } = require('./doctor.constants');
 
 class DoctorService {
   async createDoctor(hospitalId, doctorData) {
@@ -101,46 +102,117 @@ class DoctorService {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
     }
 
-    // Check if doctor exists and belongs to hospital
+    // Get doctor with minimal required fields in a single query
     const doctor = await prisma.doctor.findFirst({
-      where: { id: doctorId, hospitalId },
-      include: { schedules: true }
+      where: { 
+        id: doctorId, 
+        hospitalId,
+        status: 'ACTIVE' // Only active doctors can have schedule updates
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        status: true,
+        hospitalId: true,
+        schedules: {
+          where: {
+            dayOfWeek: dayOfWeek
+          },
+          select: {
+            startTime: true,
+            endTime: true
+          }
+        }
+      }
     });
 
     if (!doctor) {
-      throw new Error('Doctor not found');
+      throw new Error('Doctor not found or inactive');
     }
 
-    // Update schedule
-    const updatedSchedule = await prisma.doctorSchedule.upsert({
-      where: {
-        doctorId_hospitalId_dayOfWeek: {
+    // Start a transaction for schedule update and affected appointments
+    const { updatedSchedule, affectedAppointments } = await prisma.$transaction(async (tx) => {
+      // Update schedule
+      const schedule = await tx.doctorSchedule.upsert({
+        where: {
+          doctorId_hospitalId_dayOfWeek: {
+            doctorId,
+            hospitalId,
+            dayOfWeek
+          }
+        },
+        create: {
+          ...validationResult.data,
           doctorId,
           hospitalId,
-          dayOfWeek
-        }
-      },
-      create: {
-        ...validationResult.data,
-        doctorId,
-        hospitalId,
-        dayOfWeek
-      },
-      update: validationResult.data
+          dayOfWeek,
+          status: scheduleData.status || SCHEDULE_STATUS.ACTIVE
+        },
+        update: validationResult.data
+      });
+
+      // Get affected appointments only if schedule is being made inactive or time window changed
+      let affected = [];
+      const scheduleChanged = doctor.schedules[0] && (
+        doctor.schedules[0].startTime !== scheduleData.startTime || 
+        doctor.schedules[0].endTime !== scheduleData.endTime
+      );
+
+      if (scheduleData.status === SCHEDULE_STATUS.INACTIVE || scheduleChanged) {
+        affected = await tx.appointment.findMany({
+          where: {
+            doctorId,
+            scheduledTime: {
+              gte: new Date(),
+            },
+            status: 'CONFIRMED',
+            AND: {
+              scheduledTime: {
+                gte: this.getNextDayOfWeek(dayOfWeek),
+              }
+            }
+          },
+          select: {
+            id: true,
+            scheduledTime: true,
+            duration: true,
+            patient: {
+              select: {
+                name: true,
+                phone: true
+              }
+            }
+          }
+        });
+      }
+
+      return { 
+        updatedSchedule: schedule, 
+        affectedAppointments: affected 
+      };
     });
 
-    // Send schedule update email
-    await mailService.sendMail(
-      doctor.email,
-      'Schedule Update Notification',
-      this.getScheduleUpdateEmailTemplate(doctor, updatedSchedule),
-      hospitalId
-    );
+    // Handle notifications if there are affected appointments
+    if (affectedAppointments.length > 0) {
+      await this.notifyScheduleChanges(doctor, affectedAppointments, 'schedule update');
+    }
 
-    // Invalidate schedule cache
-    await redisService.invalidateCache(CACHE_KEYS.DOCTOR_SCHEDULE + doctorId);
+    // Invalidate relevant caches
+    await Promise.all([
+      redisService.invalidateCache(CACHE_KEYS.DOCTOR_SCHEDULE + doctorId),
+      redisService.invalidateCache(CACHE_KEYS.DOCTOR_DETAILS + doctorId)
+    ]);
 
     return updatedSchedule;
+  }
+
+  async getHospitalAdminEmail(hospitalId) {
+    const hospital = await prisma.hospital.findUnique({
+      where: { id: hospitalId },
+      select: { adminEmail: true }
+    });
+    return hospital?.adminEmail;
   }
 
   async getDoctorDetails(hospitalId, doctorId) {
@@ -168,57 +240,50 @@ class DoctorService {
     return doctor;
   }
 
-  async listDoctors(hospitalId, filters = {}, pagination = { page: 1, limit: 10 }) {
+  async listDoctors(hospitalId) {
     const cacheKey = CACHE_KEYS.DOCTOR_LIST + hospitalId;
     
-    // For simplicity, only cache when no filters are applied
-    if (Object.keys(filters).length === 0) {
-      const cachedList = await redisService.getCache(cacheKey);
-      if (cachedList) {
-        return cachedList;
+    // Try cache first
+    const cachedDoctors = await redisService.getCache(cacheKey);
+    if (cachedDoctors) {
+      return cachedDoctors;
+    }
+
+    // Get all doctors with their schedules
+    const doctors = await prisma.doctor.findMany({
+      where: { 
+        hospitalId 
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        specialization: true,
+        qualification: true,
+        experience: true,
+        photo: true,
+        status: true,
+        schedules: {
+          select: {
+            dayOfWeek: true,
+            startTime: true,
+            endTime: true,
+            lunchTime: true,
+            status: true,
+            avgConsultationTimeMinutes: true
+          }
+        }
+      },
+      orderBy: {
+        name: 'asc'
       }
-    }
+    });
 
-    const where = { hospitalId };
+    // Cache the result
+    await redisService.setCache(cacheKey, doctors, CACHE_EXPIRY.DOCTOR_LIST);
 
-    // Apply filters
-    if (filters.name) {
-      where.name = { contains: filters.name, mode: 'insensitive' };
-    }
-    if (filters.specialization) {
-      where.specialization = { contains: filters.specialization, mode: 'insensitive' };
-    }
-
-    const skip = (pagination.page - 1) * pagination.limit;
-
-    // Get doctors with count
-    const [total, doctors] = await prisma.$transaction([
-      prisma.doctor.count({ where }),
-      prisma.doctor.findMany({
-        where,
-        include: { schedules: true },
-        skip,
-        take: pagination.limit,
-        orderBy: { name: 'asc' }
-      })
-    ]);
-
-    const result = {
-      data: doctors,
-      pagination: {
-        page: pagination.page,
-        limit: pagination.limit,
-        total,
-        totalPages: Math.ceil(total / pagination.limit)
-      }
-    };
-
-    // Cache only if no filters
-    if (Object.keys(filters).length === 0) {
-      await redisService.setCache(cacheKey, result, CACHE_EXPIRY.DOCTOR_LIST);
-    }
-
-    return result;
+    return doctors;
   }
 
   // Helper methods
@@ -273,6 +338,33 @@ class DoctorService {
       </div>
     `;
   }
+
+  // Helper method to get next occurrence of a day of week
+  getNextDayOfWeek(dayOfWeek) {
+    const today = new Date();
+    const result = new Date(today);
+    result.setDate(today.getDate() + (7 + dayOfWeek - today.getDay()) % 7);
+    return result;
+  }
+
+  // Helper method to handle email notifications
+  async notifyScheduleChanges(doctor, appointments, reason) {
+    await rabbitmqService.publishToQueue('appointment_updates', {
+      appointments: appointments.map(apt => ({
+        id: apt.id,
+        patientName: apt.patient.name,
+        patientPhone: apt.patient.phone,
+        scheduledTime: apt.scheduledTime,
+        duration: apt.duration
+      })),
+      doctor: {
+        ...doctor,
+        hospitalAdminEmail: await this.getHospitalAdminEmail(doctor.hospitalId)
+      },
+      reason
+    });
+  }
+  
 }
 
 module.exports = new DoctorService();

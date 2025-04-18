@@ -125,13 +125,7 @@ class DoctorController {
 
   async listDoctors(req, res) {
     try {
-      const { page = 1, limit = 10, ...filters } = req.query;
-      const doctors = await doctorService.listDoctors(
-        req.user.hospital_id,
-        filters,
-        { page: parseInt(page), limit: parseInt(limit) }
-      );
-
+      const doctors = await doctorService.listDoctors(req.user.hospital_id);
       return res.json(doctors);
     } catch (error) {
       console.error('Error listing doctors:', error);
