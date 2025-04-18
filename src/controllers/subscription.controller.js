@@ -34,20 +34,17 @@ class SubscriptionController {
         if (plans?.length > 0) {
           // Store in cache if we got plans
           await this.updateCache(plans);
+        } else {
+          return res.status(404).json({ error: 'No subscription plans found' });
         }
       } else {
         console.log('Cache hit - serving from Redis');
       }
 
-      // Failsafe: If both Redis and DB fail or return no data, return default plan
-      if (!plans || plans.length === 0) {
-        return res.json([this.getDefaultPlan()]);
-      }
-
       return res.json(plans);
     } catch (error) {
       console.error('Error fetching subscription plans:', error);
-      return res.status(200).json([this.getDefaultPlan()]);
+      return res.status(500).json({ error: 'Failed to fetch subscription plans' });
     }
   }
 
@@ -197,8 +194,12 @@ class SubscriptionController {
 
   async updateCache(plans) {
     try {
+      // First invalidate the existing cache
+      await redisService.invalidateCache(this.CACHE_KEY);
+      
+      // Then set the new data
       await redisService.setCache(this.CACHE_KEY, plans, this.CACHE_EXPIRY);
-      console.log('Cache updated successfully');
+      console.log('Cache invalidated and updated successfully');
     } catch (error) {
       console.error('Error updating cache:', error);
       throw error; // Propagate error to trigger rollback in transaction
@@ -251,19 +252,6 @@ class SubscriptionController {
     } catch (error) {
       console.error('Error notifying plan update:', error);
     }
-  }
-
-  getDefaultPlan() {
-    return {
-      id: 'default',
-      name: 'Basic Plan',
-      description: 'Default basic plan',
-      maxDoctors: 1,
-      monthlyPrice: 0,
-      yearlyPrice: 0,
-      features: ['Basic features'],
-      isActive: true
-    };
   }
 }
 

@@ -3,13 +3,25 @@ const rabbitmq = require('../config/rabbitmq.config');
 class RabbitMQService {
   constructor() {
     this.initialized = false;
+    this.initPromise = null;
   }
 
   async initialize() {
     if (!this.initialized) {
-      await rabbitmq.connect();
-      this.initialized = true;
+      if (!this.initPromise) {
+        this.initPromise = rabbitmq.connect()
+          .then(() => {
+            this.initialized = true;
+            console.log('RabbitMQ Connected');
+          })
+          .catch(error => {
+            this.initPromise = null;
+            throw error;
+          });
+      }
+      await this.initPromise;
     }
+    return this.initPromise;
   }
 
   // Exchange Types

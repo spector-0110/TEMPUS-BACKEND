@@ -13,6 +13,7 @@ class HospitalController {
     this.getDashboardStats = this.getDashboardStats.bind(this);
   }
 
+  
   // Helper method to validate contact info
   validateContactInfo(contactInfo) {
     const requiredFields = ['phone'];
