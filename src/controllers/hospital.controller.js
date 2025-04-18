@@ -2,6 +2,7 @@ const { prisma } = require('../services/database.service');
 const otpService = require('../services/otp.service');
 const mailService = require('../services/mail.service');
 const messageProcessor = require('../queue/messageProcessor');
+const formService = require('../services/form.service');
 
 class HospitalController {
   constructor() {
@@ -11,9 +12,65 @@ class HospitalController {
     this.verifyEditOTP = this.verifyEditOTP.bind(this);
     this.updateHospitalDetails = this.updateHospitalDetails.bind(this);
     this.getDashboardStats = this.getDashboardStats.bind(this);
+    this.getFormConfig = this.getFormConfig.bind(this);
+    this.updateFormConfig = this.updateFormConfig.bind(this);
+    this.resetFormConfig = this.resetFormConfig.bind(this);
   }
 
-  
+  async validateFormData(data) {
+    const formConfig = await formService.getConfig();
+    const errors = [];
+    const transformedData = { ...data };
+
+    // Iterate through sections and validate each field
+    for (const section of formConfig.sections) {
+      for (const field of section.fields) {
+        const value = this.getNestedValue(data, field.id);
+        
+        // Skip validation if field is not required and value is not provided
+        if (!field.required && (value === undefined || value === null || value === '')) {
+          continue;
+        }
+
+        const validationResult = await formService.validateFieldValue(field, value);
+        
+        if (!validationResult.isValid) {
+          errors.push({
+            field: field.id,
+            label: field.label,
+            errors: validationResult.errors
+          });
+        } else if (validationResult.transformedValue !== undefined) {
+          // Update the data with transformed value
+          this.setNestedValue(transformedData, field.id, validationResult.transformedValue);
+        }
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      transformedData
+    };
+  }
+
+  // Helper to get nested object value by path
+  getNestedValue(obj, path) {
+    return path.split('.').reduce((current, key) => 
+      current ? current[key] : undefined, obj);
+  }
+
+  // Helper to set nested object value by path
+  setNestedValue(obj, path, value) {
+    const keys = path.split('.');
+    const lastKey = keys.pop();
+    const target = keys.reduce((current, key) => {
+      if (!current[key]) current[key] = {};
+      return current[key];
+    }, obj);
+    target[lastKey] = value;
+  }
+
   // Helper method to validate contact info
   validateContactInfo(contactInfo) {
     const requiredFields = ['phone'];
@@ -50,57 +107,34 @@ class HospitalController {
     try {
       const supabaseUserId = req.user.id;
       const hospitalData = req.body;
-      const addressObj = hospitalData.address || {};
-      const addressString = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}, ${addressObj.pincode}, ${addressObj.country}`;
 
+      // Validate using form configuration
+      const validationResult = await this.validateFormData(hospitalData);
+      
+      if (!validationResult.isValid) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: validationResult.errors
+        });
+      }
+
+      // Use validated and transformed data
+      const validatedData = validationResult.transformedData;
 
       if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
         return res.status(400).json({ error: 'Hospital already exists for this user' });
       }
 
-      // Validate required fields
-      const requiredFields = ['name', 'subdomain', 'contactInfo'];
-      const missingFields = requiredFields.filter(field => !hospitalData[field]);
-      if (missingFields.length > 0) {
-        return res.status(400).json({ 
-          error: 'Missing required fields', 
-          fields: missingFields 
-        });
-      }
-
-      // Validate subdomain format
-      const subdomainRegex = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-      if (!subdomainRegex.test(hospitalData.subdomain)) {
-        return res.status(400).json({ 
-          error: 'Invalid subdomain format. Use only lowercase letters, numbers, and hyphens. Must start and end with alphanumeric.' 
-        });
-      }
-
-      // // Validate email format
-      // const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      // if (!emailRegex.test(hospitalData.adminEmail)) {
-      //   return res.status(400).json({
-      //     error: 'Invalid email format'
-      //   });
-      // }
-
-      // Validate contact info
-      try {
-        this.validateContactInfo(hospitalData.contactInfo);
-      } catch (error) {
-        return res.status(400).json({ error: error.message });
-      }
+      // Format address
+      const addressObj = validatedData.address || {};
+      const addressString = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}, ${addressObj.pincode}`;
 
       // Use transaction to ensure data consistency
       const newHospital = await prisma.$transaction(async (tx) => {
-        // Check unique constraints within transaction
-        const [existingSubdomain, existingEmail] = await Promise.all([
-          tx.hospital.findUnique({ 
-            where: { subdomain: hospitalData.subdomain },
-            select: { id: true }
-          }),
-          tx.hospital.findUnique({ 
-            where: { adminEmail: req.user.email },
+        // Check unique constraints
+        const [existingSubdomain] = await Promise.all([
+          tx.hospital.findUnique({
+            where: { subdomain: validatedData.subdomain },
             select: { id: true }
           })
         ]);
@@ -108,26 +142,24 @@ class HospitalController {
         if (existingSubdomain) {
           throw new Error('Subdomain already in use');
         }
-        if (existingEmail) {
-          throw new Error('Admin email already registered');
-        }
 
-        // Create hospital record
+        // Create hospital record with validated data
         const hospital = await tx.hospital.create({
           data: {
             supabaseUserId,
-            name: hospitalData.name,
-            subdomain: hospitalData.subdomain.toLowerCase(),
-            adminEmail:req.user.email,
-            gstin: hospitalData.gstin,
+            name: validatedData.name,
+            subdomain: validatedData.subdomain.toLowerCase(),
+            adminEmail: req.user.email,
+            gstin: validatedData.gstin,
             address: addressString,
-            contactInfo: hospitalData.contactInfo,
-            logo: hospitalData.logo,
-            themeColor: hospitalData.themeColor || '#2563EB', // Default theme color
+            contactInfo: validatedData.contactInfo,
+            logo: validatedData.logo,
+            themeColor: validatedData.themeColor || '#2563EB',
+            establishedDate: validatedData.establishedDate
           },
         });
 
-        // Send welcome email through queue
+        // Queue welcome email
         await messageProcessor.publishNotification({
           type: 'EMAIL',
           to: req.user.email,
@@ -137,7 +169,7 @@ class HospitalController {
 
         return hospital;
       });
-  
+
       return res.status(201).json({
         message: 'Hospital created successfully',
         hospital: newHospital
@@ -145,13 +177,10 @@ class HospitalController {
     } catch (error) {
       console.error('Error creating hospital:', error);
       
-      // Handle known errors
-      if (error.message === 'Subdomain already in use' || 
-          error.message === 'Admin email already registered') {
+      if (error.message === 'Subdomain already in use') {
         return res.status(400).json({ error: error.message });
       }
       
-      // Handle Prisma unique constraint violations
       if (error.code === 'P2002') {
         const field = error.meta?.target?.[0] || 'field';
         return res.status(400).json({ 
@@ -234,12 +263,25 @@ class HospitalController {
         return res.status(403).json({ error: 'OTP verification required for editing' });
       }
 
-      // Filter allowed fields for update
-      const allowedFields = ['name', 'address', 'contactInfo', 'logo', 'themeColor', 'gstin'];
-      const sanitizedData = Object.keys(updateData)
+      // Validate update data using form configuration
+      const validationResult = await this.validateFormData(updateData);
+      
+      if (!validationResult.isValid) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: validationResult.errors
+        });
+      }
+
+      // Use validated and transformed data
+      const validatedData = validationResult.transformedData;
+
+      // Filter allowed fields and format address if present
+      const allowedFields = ['name', 'address', 'contactInfo', 'logo', 'themeColor', 'gstin', 'establishedDate'];
+      const sanitizedData = Object.keys(validatedData)
         .filter(key => allowedFields.includes(key))
         .reduce((obj, key) => {
-          obj[key] = updateData[key];
+          obj[key] = validatedData[key];
           return obj;
         }, {});
 
@@ -250,13 +292,10 @@ class HospitalController {
         });
       }
 
-      // Validate contactInfo if it's being updated
-      if (sanitizedData.contactInfo) {
-        if (typeof sanitizedData.contactInfo !== 'object') {
-          return res.status(400).json({ 
-            error: 'contactInfo must be an object'
-          });
-        }
+      // Format address if provided
+      if (sanitizedData.address) {
+        const addr = sanitizedData.address;
+        sanitizedData.address = `${addr.street}, ${addr.city}, ${addr.state}, ${addr.pincode}`;
       }
 
       // Update hospital details
@@ -383,6 +422,68 @@ class HospitalController {
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
       return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  async getFormConfig(req, res) {
+    try {
+      const config = await formService.getConfig();
+      if (!config) {
+        return res.status(404).json({ 
+          error: 'Form configuration not found',
+          message: 'Using default configuration'
+        });
+      }
+      return res.json(config);
+    } catch (error) {
+      console.error('Error fetching form config:', error);
+      return res.status(500).json({ 
+        error: 'Failed to fetch form configuration',
+        message: error.message 
+      });
+    }
+  }
+
+  async updateFormConfig(req, res) {
+    try {
+      const newConfig = req.body;
+      
+      // Check if config is provided
+      if (!newConfig || !Object.keys(newConfig).length) {
+        return res.status(400).json({ 
+          error: 'Invalid request',
+          message: 'Form configuration is required' 
+        });
+      }
+
+      await formService.updateConfig(newConfig);
+      return res.json({ 
+        message: 'Form configuration updated successfully',
+        config: newConfig 
+      });
+    } catch (error) {
+      console.error('Error updating form config:', error);
+      return res.status(error.message.includes('Invalid form') ? 400 : 500).json({ 
+        error: error.message.includes('Invalid form') ? 'Validation Error' : 'Failed to update form configuration',
+        message: error.message 
+      });
+    }
+  }
+
+  async resetFormConfig(req, res) {
+    try {
+      await formService.resetToDefault();
+      const config = await formService.getConfig();
+      return res.json({ 
+        message: 'Form configuration reset to default',
+        config 
+      });
+    } catch (error) {
+      console.error('Error resetting form config:', error);
+      return res.status(500).json({ 
+        error: 'Failed to reset form configuration',
+        message: error.message 
+      });
     }
   }
 }
