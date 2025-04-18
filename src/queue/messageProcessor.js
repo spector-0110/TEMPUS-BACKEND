@@ -5,8 +5,8 @@ const mailService = require('../services/mail.service');
 class MessageProcessor {
   constructor() {
     this.rabbitmqService = RabbitMQService;
+    this.initialized = false;
   }
-
 
   async initialize() {
     // Initialize RabbitMQ service
@@ -57,6 +57,11 @@ class MessageProcessor {
   async setupEmailConsumer() {
     await this.rabbitmqService.consumeQueue('email_notifications', async (data) => {
       try {
+        // Verify mail service connection
+        if (!await mailService.verifyConnection()) {
+          throw new Error('Mail service unavailable');
+        }
+
         // Handle OTP emails specially
         if (data.subject?.includes('OTP')) {
           const otp = data.content.match(/\d{6}/)[0];
@@ -65,21 +70,34 @@ class MessageProcessor {
           // Handle regular emails
           await mailService.sendMail(data.to, data.subject, data.content, data.hospitalId);
         }
+
+        // Log success
+        await redisService.setCache(`email:success:${Date.now()}`, {
+          status: 'sent',
+          data,
+          timestamp: new Date().toISOString()
+        }, 7 * 24 * 60 * 60);
+
       } catch (error) {
         console.error('Error processing email:', error);
-        // Log failure
+        
+        // Log failure with more details
         await redisService.setCache(`email:error:${Date.now()}`, {
           status: 'failed',
           data,
           error: error.message,
+          stack: error.stack,
           timestamp: new Date().toISOString()
         }, 7 * 24 * 60 * 60);
 
-        throw error; // Allow RabbitMQ to handle retry
+        // Throw error to trigger RabbitMQ retry mechanism
+        throw error;
       }
     }, {
-      maxRetries: 3, // Retry failed emails up to 3 times
-      prefetch: 5 // Process 5 emails at a time
+      maxRetries: 5,
+      prefetch: 5,
+      retryDelay: 5000, // 5 seconds between retries
+      deadLetterExchange: true
     });
   }
 
@@ -104,14 +122,32 @@ class MessageProcessor {
   }
 
   async publishNotification(notificationData) {
+    if (!this.initialized) {
+      await this.initialize();
+      this.initialized = true;
+    }
+
     const { type, ...data } = notificationData;
     const queueName = type.toLowerCase() === 'email' ? 'email_notifications' : 'sms_notifications';
     
-    await this.rabbitmqService.publishToQueue(queueName, {
+    const messageId = await this.rabbitmqService.publishToQueue(queueName, {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type,
       timestamp: new Date().toISOString(),
       ...data
+    }, {
+      persistent: true,
+      messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     });
+
+    // Log publish attempt
+    await redisService.setCache(`message:published:${messageId}`, {
+      queue: queueName,
+      data: notificationData,
+      timestamp: new Date().toISOString()
+    }, 24 * 60 * 60); // 24 hours retention
+
+    return messageId;
   }
 }
 

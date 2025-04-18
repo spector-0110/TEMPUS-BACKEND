@@ -45,7 +45,7 @@ model Hospital {
   adminEmail     String    @unique @map("admin_email")
   subdomain      String    @unique
   gstin          String?
-  address        String?
+  address        Json?
   contactInfo    Json?     @map("contact_info")
   logo           String?
   themeColor     String?   @map("theme_color")

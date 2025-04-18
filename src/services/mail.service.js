@@ -3,15 +3,8 @@ const redisService = require('./redis.service');
 
 class MailService {
   constructor() {
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD
-      }
-    });
+    this.initialized = false;
+    this.initializeTransporter();
 
     this.RATE_LIMIT = {
       WINDOW: 3600, // 1 hour
@@ -19,12 +12,42 @@ class MailService {
     };
   }
 
+  initializeTransporter() {
+    this.transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD
+      },
+      pool: true, // Use pooled connections
+      maxConnections: 5,
+      maxMessages: 100,
+      rateDelta: 1000, // Min time between messages
+      rateLimit: 5, // Max messages per rateDelta
+      tls: {
+        rejectUnauthorized: process.env.NODE_ENV === 'production'
+      }
+    });
+
+    // Handle transporter events
+    this.transporter.on('error', (err) => {
+      console.error('Mail transporter error:', err);
+      this.initialized = false;
+    });
+  }
+
   async verifyConnection() {
     try {
-      await this.transporter.verify();
+      if (!this.initialized) {
+        await this.transporter.verify();
+        this.initialized = true;
+      }
       return true;
     } catch (error) {
       console.error('Email service verification failed:', error);
+      this.initialized = false;
       return false;
     }
   }
@@ -68,17 +91,17 @@ class MailService {
         await this.checkRateLimit(hospitalId);
       }
 
+      // Ensure connection is verified
+      if (!await this.verifyConnection()) {
+        throw new Error('Email service unavailable');
+      }
+
       const mailOptions = {
         from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_FROM_ADDRESS}>`,
         to,
         subject: this.sanitizeHtml(subject),
         html: this.sanitizeHtml(html)
       };
-
-      // Verify connection before sending
-      if (!await this.verifyConnection()) {
-        throw new Error('Email service unavailable');
-      }
 
       const info = await this.transporter.sendMail(mailOptions);
       
@@ -88,10 +111,10 @@ class MailService {
         to,
         subject,
         messageId: info.messageId,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        hospitalId
       }, 7 * 24 * 60 * 60); // 7 days retention
 
-      console.log('Email sent successfully:', info.messageId);
       return true;
     } catch (error) {
       // Log failure
@@ -100,7 +123,9 @@ class MailService {
         to,
         subject,
         error: error.message,
-        timestamp: new Date().toISOString()
+        stack: error.stack,
+        timestamp: new Date().toISOString(),
+        hospitalId
       }, 7 * 24 * 60 * 60);
 
       console.error('Error sending email:', error);
@@ -111,7 +136,7 @@ class MailService {
   async sendOTPEmail(to, otp, hospitalId = null) {
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563EB;">Swasthify OTP Verification</h2>
+        <h2 style="color: #2563EB;">Tempus OTP Verification</h2>
         <p>Hello,</p>
         <p>Your OTP for editing hospital details is:</p>
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
@@ -121,7 +146,7 @@ class MailService {
         <p style="color: #64748b; font-size: 14px;">If you didn't request this OTP, please ignore this email.</p>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
         <p style="color: #64748b; font-size: 12px;">
-          This is an automated email from Swasthify. Please do not reply to this email.
+          This is an automated email from Tempus. Please do not reply to this email.
         </p>
         <p style="color: #64748b; font-size: 10px;">
           Sent at: ${new Date().toISOString()}

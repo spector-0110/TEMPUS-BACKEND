@@ -27,8 +27,8 @@ class HospitalService {
     }
 
     // Format address
-    const addressObj = validatedData.address || {};
-    const addressString = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}, ${addressObj.pincode}`;
+    // const addressObj = validatedData.address || {};
+    // const addressString = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}, ${addressObj.pincode}`;
 
     // Use transaction to ensure data consistency
     const newHospital = await prisma.$transaction(async (tx) => {
@@ -52,20 +52,49 @@ class HospitalService {
           subdomain: validatedData.subdomain.toLowerCase(),
           adminEmail: userEmail,
           gstin: validatedData.gstin,
-          address: addressString,
+          address: validatedData.address,
           contactInfo: validatedData.contactInfo,
           logo: validatedData.logo,
           themeColor: validatedData.themeColor || DEFAULT_THEME_COLOR,
           establishedDate: validatedData.establishedDate
-        },
+        }
       });
 
-      // Queue welcome email
+      // Queue welcome email with proper HTML template
       await messageProcessor.publishNotification({
         type: 'EMAIL',
         to: userEmail,
         subject: 'Welcome to Tempus',
-        content: `Welcome to Tempus! Your hospital ${hospital.name} has been successfully registered.`
+        content: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #2563EB;">Welcome to Tempus!</h2>
+            <p>Dear Admin,</p>
+            <p>Your hospital "${hospital.name}" has been successfully registered with Tempus. Here are your hospital details:</p>
+            
+            <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+              <p><strong>Hospital Name:</strong> ${hospital.name}</p>
+              <p><strong>Subdomain:</strong> ${hospital.subdomain}</p>
+              <p><strong>Admin Email:</strong> ${hospital.adminEmail}</p>
+              <p><strong>Address:</strong> ${hospital.address}</p>
+            </div>
+
+            <p>You can now:</p>
+            <ul>
+              <li>Set up your subscription plan</li>
+              <li>Add doctors to your hospital</li>
+              <li>Configure your hospital settings</li>
+              <li>Start managing appointments</li>
+            </ul>
+
+            <p>If you need any assistance, please don't hesitate to contact our support team.</p>
+            
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="color: #64748b; font-size: 12px;">
+              This is an automated email from Tempus. Please do not reply to this email.
+            </p>
+          </div>
+        `,
+        hospitalId: hospital.id
       });
 
       return hospital;
