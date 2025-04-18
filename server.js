@@ -9,6 +9,7 @@ const messageProcessor = require('./src/queue/messageProcessor');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
 const patientRoutes = require('./src/routes/patient.routes');
+const doctorRoutes = require('./src/routes/doctor.routes');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -81,6 +82,7 @@ app.get('/health', async (req, res) => {
 app.use('/api/hospitals', hospitalRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/patients', patientRoutes);
+app.use('/api/doctors', doctorRoutes);
 
 // Basic route
 app.get('/', (req, res) => {

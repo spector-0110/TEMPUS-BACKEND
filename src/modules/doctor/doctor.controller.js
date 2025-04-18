@@ -1,0 +1,143 @@
+const doctorService = require('./doctor.service');
+
+class DoctorController {
+  constructor() {
+    // Bind methods to ensure correct 'this' context
+    this.createDoctor = this.createDoctor.bind(this);
+    this.updateDoctorDetails = this.updateDoctorDetails.bind(this);
+    this.updateDoctorSchedule = this.updateDoctorSchedule.bind(this);
+    this.getDoctorDetails = this.getDoctorDetails.bind(this);
+    this.listDoctors = this.listDoctors.bind(this);
+  }
+
+  async createDoctor(req, res) {
+    try {
+      const doctor = await doctorService.createDoctor(
+        req.user.hospital_id,
+        req.body
+      );
+
+      return res.status(201).json({
+        message: 'Doctor created successfully',
+        doctor
+      });
+    } catch (error) {
+      console.error('Error creating doctor:', error);
+
+      if (error.message === 'No active subscription found') {
+        return res.status(402).json({ error: error.message });
+      }
+
+      if (error.message === 'Doctor limit reached for current subscription plan') {
+        return res.status(403).json({ error: error.message });
+      }
+
+      if (error.validationErrors) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: error.validationErrors
+        });
+      }
+
+      return res.status(500).json({ error: 'Failed to create doctor' });
+    }
+  }
+
+  async updateDoctorDetails(req, res) {
+    try {
+      const updatedDoctor = await doctorService.updateDoctorDetails(
+        req.user.hospital_id,
+        req.params.id,
+        req.body
+      );
+
+      return res.json({
+        message: 'Doctor updated successfully',
+        doctor: updatedDoctor
+      });
+    } catch (error) {
+      console.error('Error updating doctor:', error);
+
+      if (error.message === 'Doctor not found') {
+        return res.status(404).json({ error: error.message });
+      }
+
+      if (error.validationErrors) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: error.validationErrors
+        });
+      }
+
+      return res.status(500).json({ error: 'Failed to update doctor' });
+    }
+  }
+
+  async updateDoctorSchedule(req, res) {
+    try {
+      const schedule = await doctorService.updateDoctorSchedule(
+        req.user.hospital_id,
+        req.params.id,
+        parseInt(req.params.dayOfWeek),
+        req.body
+      );
+
+      return res.json({
+        message: 'Schedule updated successfully',
+        schedule
+      });
+    } catch (error) {
+      console.error('Error updating doctor schedule:', error);
+
+      if (error.message === 'Doctor not found') {
+        return res.status(404).json({ error: error.message });
+      }
+
+      if (error.validationErrors) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: error.validationErrors
+        });
+      }
+
+      return res.status(500).json({ error: 'Failed to update schedule' });
+    }
+  }
+
+  async getDoctorDetails(req, res) {
+    try {
+      const doctor = await doctorService.getDoctorDetails(
+        req.user.hospital_id,
+        req.params.id
+      );
+
+      return res.json(doctor);
+    } catch (error) {
+      console.error('Error fetching doctor details:', error);
+
+      if (error.message === 'Doctor not found') {
+        return res.status(404).json({ error: error.message });
+      }
+
+      return res.status(500).json({ error: 'Failed to fetch doctor details' });
+    }
+  }
+
+  async listDoctors(req, res) {
+    try {
+      const { page = 1, limit = 10, ...filters } = req.query;
+      const doctors = await doctorService.listDoctors(
+        req.user.hospital_id,
+        filters,
+        { page: parseInt(page), limit: parseInt(limit) }
+      );
+
+      return res.json(doctors);
+    } catch (error) {
+      console.error('Error listing doctors:', error);
+      return res.status(500).json({ error: 'Failed to fetch doctors' });
+    }
+  }
+}
+
+module.exports = new DoctorController();
