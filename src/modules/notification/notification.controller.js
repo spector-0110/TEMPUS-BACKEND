@@ -1,5 +1,5 @@
-const redisService = require('../services/redis.service');
-const rabbitmqService = require('../services/rabbitmq.service');
+const redisService = require('../../services/redis.service');
+const rabbitmqService = require('../../services/rabbitmq.service');
 
 class NotificationController {
   constructor() {

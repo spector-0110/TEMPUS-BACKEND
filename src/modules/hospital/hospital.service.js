@@ -64,8 +64,8 @@ class HospitalService {
       await messageProcessor.publishNotification({
         type: 'EMAIL',
         to: userEmail,
-        subject: 'Welcome to Swasthify',
-        content: `Welcome to Swasthify! Your hospital ${hospital.name} has been successfully registered.`
+        subject: 'Welcome to Tempus',
+        content: `Welcome to Tempus! Your hospital ${hospital.name} has been successfully registered.`
       });
 
       return hospital;
