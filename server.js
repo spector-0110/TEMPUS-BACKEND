@@ -8,6 +8,7 @@ const { testConnection, disconnect } = require('./src/services/database.service'
 const messageProcessor = require('./src/queue/messageProcessor');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
+const patientRoutes = require('./src/routes/patient.routes');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -77,8 +78,9 @@ app.get('/health', async (req, res) => {
 });
 
 // Routes
-app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/hospitals', hospitalRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/patients', patientRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
