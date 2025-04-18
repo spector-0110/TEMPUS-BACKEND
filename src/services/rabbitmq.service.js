@@ -10,11 +10,69 @@ class RabbitMQService {
     this.channelPool = new Map();
     this.MAX_CHANNELS = 10;
     this.lastChannelId = 0;
+
+    // Cluster configuration
+    this.clusterNodes = process.env.RABBITMQ_CLUSTER_NODES ? 
+      process.env.RABBITMQ_CLUSTER_NODES.split(',') : 
+      [process.env.RABBITMQ_URL || 'amqp://localhost'];
+
+    // Message persistence configuration
+    this.persistenceConfig = {
+      durable: true,
+      persistent: true,
+      noAck: false,
+      prefetch: parseInt(process.env.RABBITMQ_PREFETCH || '10')
+    };
+
+    // Metrics tracking
+    this.metrics = {
+      messagesPublished: 0,
+      messagesConsumed: 0,
+      errors: 0,
+      reconnections: 0,
+      lastError: null
+    };
+
+    // Logger configuration
+    this.LOG_LEVELS = {
+      ERROR: 0,
+      WARN: 1,
+      INFO: 2,
+      DEBUG: 3
+    };
+    this.logLevel = this.LOG_LEVELS[process.env.RABBITMQ_LOG_LEVEL] || this.LOG_LEVELS.INFO;
   }
 
-  /**
-   * Ensures the service is initialized
-   */
+  log(level, message, context = {}, error = null) {
+    if (this.LOG_LEVELS[level] > this.logLevel) return;
+
+    const logObject = {
+      timestamp: new Date().toISOString(),
+      service: 'RabbitMQService',
+      level,
+      message,
+      ...context
+    };
+
+    if (error) {
+      logObject.error = {
+        message: error.message,
+        stack: error.stack
+      };
+      this.metrics.errors++;
+      this.metrics.lastError = {
+        timestamp: new Date().toISOString(),
+        message: error.message
+      };
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      console[level.toLowerCase()](JSON.stringify(logObject));
+    } else {
+      console[level.toLowerCase()](`[RabbitMQ][${logObject.timestamp}][${level}] ${message}`, context);
+    }
+  }
+
   async initialize() {
     if (!this.initialized) {
       if (!this.initPromise) {
@@ -25,34 +83,33 @@ class RabbitMQService {
     return this.initPromise;
   }
 
-  /**
-   * Attempts RabbitMQ connection with retry logic
-   */
   async connectWithRetry() {
     while (this.connectionAttempts < this.maxConnectionAttempts) {
       try {
-        await rabbitmq.connect();
-        const connection = rabbitmq.getConnection();
+        // Try connecting to each node in the cluster
+        for (const node of this.clusterNodes) {
+          try {
+            await rabbitmq.connect(node);
+            const connection = rabbitmq.getConnection();
+            
+            this.setupConnectionHandlers(connection);
+            this.initialized = true;
+            this.connectionAttempts = 0;
+            
+            await this.initializeChannelPool();
+            this.log('INFO', 'RabbitMQ Connected', { node });
+            return;
+          } catch (nodeError) {
+            this.log('WARN', `Failed to connect to node ${node}`, {}, nodeError);
+            continue;
+          }
+        }
 
-        connection.on('error', (err) => {
-          console.error('RabbitMQ Connection Error:', err);
-          this.handleConnectionError();
-        });
-
-        connection.on('close', () => {
-          console.warn('RabbitMQ Connection Closed');
-          this.handleConnectionError();
-        });
-
-        this.initialized = true;
-        this.connectionAttempts = 0;
-
-        await this.initializeChannelPool();
-        console.log('RabbitMQ Connected');
-        return;
+        throw new Error('Failed to connect to all cluster nodes');
       } catch (error) {
         this.connectionAttempts++;
-        console.error(`RabbitMQ Connection Attempt ${this.connectionAttempts} failed:`, error);
+        this.log('ERROR', `Connection Attempt ${this.connectionAttempts} failed`, {}, error);
+        
         if (this.connectionAttempts < this.maxConnectionAttempts) {
           const delay = this.reconnectDelay * Math.pow(2, this.connectionAttempts - 1);
           await new Promise(res => setTimeout(res, delay));
@@ -64,9 +121,27 @@ class RabbitMQService {
     }
   }
 
-  /**
-   * Handles reconnection logic
-   */
+  setupConnectionHandlers(connection) {
+    connection.on('error', (err) => {
+      this.log('ERROR', 'Connection Error', {}, err);
+      this.handleConnectionError();
+    });
+
+    connection.on('close', () => {
+      this.log('WARN', 'Connection Closed');
+      this.handleConnectionError();
+    });
+
+    // Handle blocked/unblocked events (happens when RabbitMQ is under high memory pressure)
+    connection.on('blocked', (reason) => {
+      this.log('WARN', 'Connection blocked', { reason });
+    });
+
+    connection.on('unblocked', () => {
+      this.log('INFO', 'Connection unblocked');
+    });
+  }
+
   async handleConnectionError() {
     this.initialized = false;
     this.initPromise = null;
@@ -74,13 +149,10 @@ class RabbitMQService {
     try {
       await this.initialize();
     } catch (error) {
-      console.error('Failed to reconnect to RabbitMQ:', error);
+      this.log('ERROR', 'Failed to reconnect to RabbitMQ', {}, error);
     }
   }
 
-  /**
-   * Initializes a pool of reusable channels
-   */
   async initializeChannelPool() {
     const connection = rabbitmq.getConnection();
     for (let i = 0; i < this.MAX_CHANNELS; i++) {
@@ -90,11 +162,6 @@ class RabbitMQService {
     }
   }
 
-  /**
-   * Attaches error handlers to channel
-   * @param {*} channel 
-   * @param {number} id 
-   */
   attachChannelHandlers(channel, id) {
     // Remove existing listeners first
     channel.removeAllListeners('error');
@@ -104,20 +171,16 @@ class RabbitMQService {
     channel.setMaxListeners(5);
     
     channel.on('error', (err) => {
-      console.error(`Channel ${id} Error:`, err);
+      this.log('ERROR', `Channel ${id} Error`, {}, err);
       this.handleChannelError(id);
     });
 
     channel.on('close', () => {
-      console.warn(`Channel ${id} Closed`);
+      this.log('WARN', `Channel ${id} Closed`);
       this.handleChannelError(id);
     });
   }
 
-  /**
-   * Replaces failed channel
-   * @param {number} channelId 
-   */
   async handleChannelError(channelId) {
     try {
       const oldChannel = this.channelPool.get(channelId);
@@ -127,7 +190,7 @@ class RabbitMQService {
         try {
           await oldChannel.close();
         } catch (err) {
-          console.warn('Error closing channel:', err);
+          this.log('WARN', 'Error closing channel', {}, err);
         }
       }
 
@@ -138,14 +201,11 @@ class RabbitMQService {
       this.attachChannelHandlers(newChannel, channelId);
       this.channelPool.set(channelId, newChannel);
     } catch (err) {
-      console.error('Error recovering channel:', err);
+      this.log('ERROR', 'Error recovering channel', {}, err);
       this.channelPool.delete(channelId);
     }
   }
 
-  /**
-   * Returns a healthy channel from the pool
-   */
   async getChannel() {
     await this.initialize();
     for (let i = 0; i < this.MAX_CHANNELS; i++) {
@@ -157,12 +217,11 @@ class RabbitMQService {
       }
     }
 
-    console.warn('No active channel found, creating a temporary one');
+    this.log('WARN', 'No active channel found, creating a temporary one');
     const tempChannel = await rabbitmq.getConnection().createChannel();
     return tempChannel;
   }
 
-  // === Exchange Types ===
   static EXCHANGE_TYPES = {
     DIRECT: 'direct',
     FANOUT: 'fanout',
@@ -170,79 +229,138 @@ class RabbitMQService {
     HEADERS: 'headers'
   };
 
-  /**
-   * Creates queue with default options
-   */
-  async createQueue(queueName, options = { durable: true }) {
+  async createQueue(queueName, options = {}) {
     const channel = await this.getChannel();
+    const queueOptions = {
+      ...this.persistenceConfig,
+      ...options,
+      // Additional queue options for better reliability
+      deadLetterExchange: `${queueName}.dlx`,
+      maxLength: 1000000,
+      messageTtl: 86400000, // 24 hours
+      // Enable queue mirroring for high availability
+      'x-ha-policy': 'all',
+      // Lazy queues - messages will be written to disk more aggressively
+      'x-queue-mode': options.lazy ? 'lazy' : 'default'
+    };
+
     try {
       // First try to check if queue exists
       await channel.checkQueue(queueName);
-      console.log(`Queue ${queueName} already exists, skipping declaration`);
+      this.log('INFO', `Queue ${queueName} already exists`);
     } catch (error) {
       // Queue doesn't exist, create it with specified options
-      await channel.assertQueue(queueName, {
-        ...options,
-        deadLetterExchange: `${queueName}.dlx`,
-        maxLength: 1000000,
-        messageTtl: 86400000
+      await channel.assertQueue(queueName, queueOptions);
+      
+      // Create and bind dead letter queue
+      const dlxName = `${queueName}.dlx`;
+      const dlqName = `${queueName}.dlq`;
+      
+      await channel.assertExchange(dlxName, 'direct', { durable: true });
+      await channel.assertQueue(dlqName, {
+        durable: true,
+        deadLetterExchange: '',
+        deadLetterRoutingKey: queueName,
+        messageTtl: 7 * 24 * 60 * 60 * 1000 // 7 days retention for dead letters
       });
+      await channel.bindQueue(dlqName, dlxName, queueName);
     }
   }
 
-  /**
-   * Creates exchange
-   */
   async createExchange(exchangeName, type = RabbitMQService.EXCHANGE_TYPES.DIRECT) {
     const channel = await this.getChannel();
     await channel.assertExchange(exchangeName, type, { durable: true });
   }
 
-  /**
-   * Binds queue to exchange
-   */
   async bindQueueToExchange(queueName, exchangeName, routingKey = '') {
     const channel = await this.getChannel();
     await channel.bindQueue(queueName, exchangeName, routingKey);
   }
 
-  /**
-   * Publishes a message to a queue
-   */
   async publishToQueue(queueName, message, options = {}) {
     const channel = await this.getChannel();
-    channel.sendToQueue(queueName, Buffer.from(JSON.stringify(message)), options);
+    const publishOptions = {
+      persistent: true,
+      messageId: options.messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: options.timestamp || Date.now(),
+      headers: {
+        'x-first-death-reason': null,
+        'x-retry-count': 0,
+        ...options.headers
+      }
+    };
+
+    try {
+      channel.sendToQueue(
+        queueName, 
+        Buffer.from(JSON.stringify(message)), 
+        publishOptions
+      );
+      
+      this.metrics.messagesPublished++;
+      return true;
+    } catch (error) {
+      this.log('ERROR', 'Failed to publish message', {
+        queue: queueName,
+        messageId: publishOptions.messageId
+      }, error);
+      throw error;
+    }
   }
 
-  /**
-   * Publishes a message to an exchange
-   */
   async publishToExchange(exchangeName, routingKey, message, options = {}) {
     const channel = await this.getChannel();
     channel.publish(exchangeName, routingKey, Buffer.from(JSON.stringify(message)), options);
   }
 
-  /**
-   * Consumes messages from queue
-   */
-  async consumeQueue(queueName, callback, options = { noAck: false }) {
+  async consumeQueue(queueName, callback, options = {}) {
     const channel = await this.getChannel();
+    const consumeOptions = {
+      ...this.persistenceConfig,
+      ...options
+    };
+
+    // Set channel prefetch
+    await channel.prefetch(consumeOptions.prefetch);
+
     await channel.consume(queueName, async (msg) => {
       if (!msg) return;
+      
       try {
         const data = JSON.parse(msg.content.toString());
         await callback(data);
-        if (!options.noAck) channel.ack(msg);
+        
+        if (!consumeOptions.noAck) {
+          channel.ack(msg);
+        }
+        
+        this.metrics.messagesConsumed++;
       } catch (err) {
-        console.error('Error processing message:', err);
-        if (!options.noAck) channel.nack(msg, false, true);
+        this.log('ERROR', 'Error processing message', {
+          queue: queueName,
+          messageId: msg.properties.messageId
+        }, err);
+
+        if (!consumeOptions.noAck) {
+          // Reject the message and requeue if under retry limit
+          const retryCount = (msg.properties.headers['x-retry-count'] || 0) + 1;
+          if (retryCount <= (options.maxRetries || 3)) {
+            const headers = {
+              ...msg.properties.headers,
+              'x-retry-count': retryCount,
+              'x-first-failed-at': msg.properties.headers['x-first-failed-at'] || new Date().toISOString()
+            };
+            
+            channel.nack(msg, false, true);
+          } else {
+            // Send to dead letter queue if retry limit exceeded
+            channel.nack(msg, false, false);
+          }
+        }
       }
-    }, options);
+    }, consumeOptions);
   }
 
-  /**
-   * Creates a Dead Letter Queue
-   */
   async createDeadLetterQueue(queueName, deadLetterExchange, deadLetterRoutingKey) {
     const channel = await this.getChannel();
     await channel.assertQueue(queueName, {
@@ -254,9 +372,6 @@ class RabbitMQService {
     });
   }
 
-  /**
-   * Creates a delayed queue using TTL and dead-lettering
-   */
   async createDelayedQueue(queueName, delayMs) {
     const channel = await this.getChannel();
     await channel.assertQueue(queueName, {
@@ -269,67 +384,83 @@ class RabbitMQService {
     });
   }
 
-  /**
-   * Checks if queue exists
-   */
   async checkQueue(queueName) {
     const channel = await this.getChannel();
     return await channel.checkQueue(queueName);
   }
 
-  /**
-   * Deletes a queue
-   */
   async deleteQueue(queueName) {
     const channel = await this.getChannel();
     await channel.deleteQueue(queueName);
   }
 
-  /**
-   * Clears all messages in a queue
-   */
   async purgeQueue(queueName) {
     const channel = await this.getChannel();
     await channel.purgeQueue(queueName);
   }
 
-  /**
-   * Health check for connection and channels
-   */
-  async checkHealth() {
+  async getQueueInfo(queueName) {
+    const channel = await this.getChannel();
     try {
-      if (!this.initialized || !rabbitmq.getConnection()) {
-        return { status: 'error', message: 'RabbitMQ not connected' };
-      }
-
-      const activeChannels = Array.from(this.channelPool.values()).filter(c => c && !c.closed);
-
-      if (activeChannels.length === 0) {
-        return { status: 'warning', message: 'No active channels available' };
-      }
-
-      return {
-        status: 'healthy',
-        activeChannels: activeChannels.length,
-        totalChannels: this.MAX_CHANNELS
-      };
+      return await channel.checkQueue(queueName);
     } catch (error) {
-      return { status: 'error', message: error.message };
+      this.log('ERROR', 'Failed to get queue info', { queueName }, error);
+      return null;
     }
   }
 
-  /**
-   * Optional cleanup logic
-   */
+  async checkHealth() {
+    try {
+      if (!this.initialized || !rabbitmq.getConnection()) {
+        return { 
+          status: 'error', 
+          message: 'RabbitMQ not connected',
+          metrics: this.metrics
+        };
+      }
+
+      const connection = rabbitmq.getConnection();
+      const activeChannels = Array.from(this.channelPool.values())
+        .filter(c => c && !c.closed).length;
+
+      const health = {
+        status: activeChannels > 0 ? 'healthy' : 'warning',
+        activeChannels,
+        totalChannels: this.MAX_CHANNELS,
+        clusterNodes: this.clusterNodes,
+        metrics: this.metrics,
+        connectionState: {
+          blocked: connection.blocked,
+          connecting: connection.connecting,
+          serverProperties: connection.serverProperties
+        }
+      };
+
+      // Check if we're in a degraded state
+      if (activeChannels < this.MAX_CHANNELS * 0.5) {
+        health.status = 'warning';
+        health.message = 'Running with reduced channel capacity';
+      }
+
+      return health;
+    } catch (error) {
+      return { 
+        status: 'error', 
+        message: error.message,
+        metrics: this.metrics
+      };
+    }
+  }
+
   async close() {
     const connection = rabbitmq.getConnection();
     if (connection) {
       try {
         await connection.close();
         this.initialized = false;
-        console.log('RabbitMQ connection closed');
+        this.log('INFO', 'RabbitMQ connection closed');
       } catch (err) {
-        console.error('Error closing RabbitMQ connection:', err);
+        this.log('ERROR', 'Error closing RabbitMQ connection', {}, err);
       }
     }
   }
