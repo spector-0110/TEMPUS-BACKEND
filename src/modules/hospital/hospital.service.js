@@ -3,6 +3,7 @@ const otpService = require('../../services/otp.service');
 const mailService = require('../../services/mail.service');
 const messageProcessor = require('../../queue/messageProcessor');
 const hospitalValidator = require('./hospital.validator');
+const subscriptionService = require('../subscription/subscription.service');
 const { 
   ALLOWED_UPDATE_FIELDS, 
   DEFAULT_THEME_COLOR,
@@ -12,6 +13,7 @@ const {
 } = require('./hospital.constants');
 
 class HospitalService {
+  
   async createHospital(supabaseUserId, hospitalData, userEmail) {
     // Validate using form configuration
     const validationResult = await hospitalValidator.validateFormData(hospitalData);
@@ -25,10 +27,6 @@ class HospitalService {
     if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
       throw new Error('Hospital already exists for this user');
     }
-
-    // Format address
-    // const addressObj = validatedData.address || {};
-    // const addressString = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}, ${addressObj.pincode}`;
 
     // Use transaction to ensure data consistency
     const newHospital = await prisma.$transaction(async (tx) => {
@@ -60,7 +58,10 @@ class HospitalService {
         }
       });
 
-      // Queue welcome email with proper HTML template
+      // Assign free plan subscription
+      const subscription = await subscriptionService.assignFreePlanToHospital(hospital.id);
+
+      // Queue welcome email
       await messageProcessor.publishNotification({
         type: 'EMAIL',
         to: userEmail,
@@ -69,38 +70,34 @@ class HospitalService {
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #2563EB;">Welcome to Tempus!</h2>
             <p>Dear Admin,</p>
-            <p>Your hospital "${hospital.name}" has been successfully registered with Tempus. Here are your hospital details:</p>
+            <p>Your hospital "${hospital.name}" has been successfully registered with Tempus. Here are your details:</p>
             
             <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
               <p><strong>Hospital Name:</strong> ${hospital.name}</p>
               <p><strong>Subdomain:</strong> ${hospital.subdomain}</p>
               <p><strong>Admin Email:</strong> ${hospital.adminEmail}</p>
-              <p><strong>Address:</strong> ${hospital.address}</p>
+              ${hospital.address ? `<p><strong>Address:</strong> ${JSON.stringify(hospital.address)}</p>` : ''}
             </div>
 
-            <p>You can now:</p>
-            <ul>
-              <li>Set up your subscription plan</li>
-              <li>Add doctors to your hospital</li>
-              <li>Configure your hospital settings</li>
-              <li>Start managing appointments</li>
-            </ul>
+            <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+              <p><strong>Your Free Plan Features:</strong></p>
+              <ul>
+                <li>Up to ${subscription.planFeatures.max_doctors} doctors</li>
+                <li>${subscription.planFeatures.base_sms_credits} SMS credits</li>
+                <li>${subscription.planFeatures.base_email_credits} email credits</li>
+                ${subscription.planFeatures.analytics_access ? '<li>Basic Analytics</li>' : ''}
+                ${subscription.planFeatures.reporting_access ? '<li>Basic Reporting</li>' : ''}
+              </ul>
+              <p><em>Valid for 1 month</em></p>
+            </div>
 
-            <p>If you need any assistance, please don't hesitate to contact our support team.</p>
-            
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-            <p style="color: #64748b; font-size: 12px;">
-              This is an automated email from Tempus. Please do not reply to this email.
-            </p>
+            <p>To upgrade your plan or add more features, visit your hospital dashboard.</p>
           </div>
-        `,
-        hospitalId: hospital.id
+        `
       });
 
       return hospital;
     });
-
-    return newHospital;
   }
 
   async getHospitalDetails(hospitalId) {
@@ -197,7 +194,8 @@ class HospitalService {
       todayAppointments,
       totalDoctors,
       activeDoctors,
-      subscription
+      subscription,
+      subscriptionHistory
     ] = await Promise.all([
       prisma.appointment.count({ where: { hospitalId } }),
       prisma.appointment.count({
@@ -233,10 +231,18 @@ class HospitalService {
             select: {
               name: true,
               maxDoctors: true,
-              features: true
+              features: true,
+              monthlyPrice: true,
+              yearlyPrice: true
             }
           }
         }
+      }),
+      prisma.subscriptionHistory.findMany({
+        where: { hospitalId },
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        include: { plan: true }
       })
     ]);
 
@@ -260,6 +266,14 @@ class HospitalService {
           email: subscription.emailCredits
         }
       } : null,
+      subscriptionHistory: subscriptionHistory.map(sub => ({
+        planName: sub.plan.name,
+        startDate: sub.startDate,
+        endDate: sub.endDate,
+        status: sub.status,
+        price: sub.price,
+        billingCycle: sub.billingCycle
+      })),
       licenseWarnings: []
     };
 

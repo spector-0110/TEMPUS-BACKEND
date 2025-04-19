@@ -2,166 +2,127 @@ const {
   SUBSCRIPTION_STATUS, 
   BILLING_CYCLE,
   MIN_SUBSCRIPTION_PRICE,
-  MAX_DOCTORS_PER_PLAN
+  MAX_DOCTORS_PER_PLAN,
+  FEATURE_LIMITS
 } = require('./subscription.constants');
 
+const Joi = require('joi');
+
+/**
+ * Validates subscription plan features structure
+ */
+const validatePlanFeatures = Joi.object({
+  max_doctors: Joi.number()
+    .required()
+    .min(FEATURE_LIMITS.MIN_DOCTORS)
+    .max(FEATURE_LIMITS.MAX_DOCTORS),
+  base_sms_credits: Joi.number()
+    .required()
+    .min(FEATURE_LIMITS.MIN_SMS_CREDITS)
+    .max(FEATURE_LIMITS.MAX_SMS_CREDITS),
+  base_email_credits: Joi.number()
+    .required()
+    .min(FEATURE_LIMITS.MIN_EMAIL_CREDITS)
+    .max(FEATURE_LIMITS.MAX_EMAIL_CREDITS),
+  analytics_access: Joi.boolean().required(),
+  reporting_access: Joi.boolean().required(),
+  premium_support: Joi.boolean().required(),
+  custom_branding: Joi.boolean().required(),
+  additional_features: Joi.array().items(Joi.string())
+});
+
+/**
+ * Schema for creating a new subscription plan
+ */
+const createSubscriptionPlanSchema = Joi.object({
+  name: Joi.string().required().trim(),
+  description: Joi.string().allow('', null),
+  monthlyPrice: Joi.number().required().min(MIN_SUBSCRIPTION_PRICE).precision(2),
+  yearlyPrice: Joi.number().required().min(MIN_SUBSCRIPTION_PRICE).precision(2),
+  features: validatePlanFeatures.required()
+});
+
+/**
+ * Schema for updating an existing subscription plan
+ */
+const updateSubscriptionPlanSchema = Joi.object({
+  name: Joi.string().trim(),
+  description: Joi.string().allow('', null),
+  monthlyPrice: Joi.number().min(MIN_SUBSCRIPTION_PRICE).precision(2),
+  yearlyPrice: Joi.number().min(MIN_SUBSCRIPTION_PRICE).precision(2),
+  features: validatePlanFeatures,
+  isActive: Joi.boolean()
+}).min(1); // At least one field must be provided for update
+
 class SubscriptionValidator {
+  
   validatePlanData(data, isUpdate = false) {
-    const errors = [];
+    // Use appropriate schema based on operation type
+    const schema = isUpdate ? updateSubscriptionPlanSchema : createSubscriptionPlanSchema;
+    const validation = schema.validate(data, { abortEarly: false });
 
-    // For updates, we don't require all fields
-    if (!isUpdate) {
-      if (!data.name?.trim()) {
-        errors.push('Plan name is required');
-      }
-      if (!data.maxDoctors) {
-        errors.push('Maximum number of doctors is required');
-      }
-      if (data.monthlyPrice === undefined && data.yearlyPrice === undefined) {
-        errors.push('At least one pricing option (monthly or yearly) is required');
-      }
-    }
-
-    // Validate provided fields
-    if (data.name !== undefined && !data.name.trim()) {
-      errors.push('Plan name cannot be empty');
-    }
-
-    if (data.monthlyPrice !== undefined) {
-      if (!Number.isInteger(data.monthlyPrice)) {
-        errors.push('Monthly price must be an integer (in cents)');
-      }
-      if (data.monthlyPrice < MIN_SUBSCRIPTION_PRICE) {
-        errors.push('Monthly price cannot be negative');
-      }
-    }
-
-    if (data.yearlyPrice !== undefined) {
-      if (!Number.isInteger(data.yearlyPrice)) {
-        errors.push('Yearly price must be an integer (in cents)');
-      }
-      if (data.yearlyPrice < MIN_SUBSCRIPTION_PRICE) {
-        errors.push('Yearly price cannot be negative');
-      }
-    }
-
-    if (data.maxDoctors !== undefined) {
-      if (!Number.isInteger(data.maxDoctors)) {
-        errors.push('Maximum doctors must be an integer');
-      }
-      if (data.maxDoctors <= 0) {
-        errors.push('Maximum doctors must be greater than 0');
-      }
-      if (data.maxDoctors > MAX_DOCTORS_PER_PLAN) {
-        errors.push(`Maximum doctors cannot exceed ${MAX_DOCTORS_PER_PLAN}`);
-      }
-    }
-
-    if (data.features !== undefined) {
-      if (!Array.isArray(data.features)) {
-        errors.push('Features must be an array');
-      } else {
-        data.features.forEach((feature, index) => {
-          if (!feature.name) {
-            errors.push(`Feature at index ${index} must have a name`);
-          }
-          if (feature.isEnabled === undefined) {
-            errors.push(`Feature at index ${index} must specify isEnabled`);
-          }
-        });
-      }
+    if (validation.error) {
+      return {
+        isValid: false,
+        errors: validation.error.details.map(err => err.message)
+      };
     }
 
     return {
-      isValid: errors.length === 0,
-      errors
+      isValid: true,
+      data: validation.value
     };
   }
 
   validateSubscriptionData(data) {
-    const errors = [];
+    const schema = Joi.object({
+      hospitalId: Joi.string().uuid().required(),
+      planId: Joi.string().uuid().required(),
+      billingCycle: Joi.string().valid(...Object.values(BILLING_CYCLE)).required(),
+      startDate: Joi.date().iso().required(),
+      endDate: Joi.date().iso().greater(Joi.ref('startDate')).required(),
+      status: Joi.string().valid(...Object.values(SUBSCRIPTION_STATUS)).default(SUBSCRIPTION_STATUS.PENDING),
+      autoRenew: Joi.boolean().default(true),
+      paymentMethod: Joi.string().allow('', null),
+      paymentDetails: Joi.object().allow(null)
+    });
 
-    if (!data.hospitalId) {
-      errors.push('Hospital ID is required');
-    }
+    const validation = schema.validate(data, { abortEarly: false });
 
-    if (!data.planId) {
-      errors.push('Plan ID is required');
-    }
-
-    if (!data.billingCycle) {
-      errors.push('Billing cycle is required');
-    } else if (!Object.values(BILLING_CYCLE).includes(data.billingCycle)) {
-      errors.push('Invalid billing cycle');
-    }
-
-    if (data.startDate && !(new Date(data.startDate)).getTime()) {
-      errors.push('Invalid start date');
-    }
-
-    if (data.endDate && !(new Date(data.endDate)).getTime()) {
-      errors.push('Invalid end date');
-    }
-
-    if (data.startDate && data.endDate) {
-      const start = new Date(data.startDate);
-      const end = new Date(data.endDate);
-      if (end <= start) {
-        errors.push('End date must be after start date');
-      }
-    }
-
-    if (data.status && !Object.values(SUBSCRIPTION_STATUS).includes(data.status)) {
-      errors.push('Invalid subscription status');
+    if (validation.error) {
+      return {
+        isValid: false,
+        errors: validation.error.details.map(err => err.message)
+      };
     }
 
     return {
-      isValid: errors.length === 0,
-      errors
+      isValid: true,
+      data: validation.value
     };
   }
 
   validateUsageUpdate(data) {
-    const errors = [];
+    const schema = Joi.object({
+      hospitalId: Joi.string().uuid().required(),
+      subscriptionId: Joi.string().uuid().required(),
+      doctorsCount: Joi.number().integer().min(0).max(FEATURE_LIMITS.MAX_DOCTORS),
+      smsUsed: Joi.number().integer().min(0),
+      emailsUsed: Joi.number().integer().min(0)
+    }).min(3); // Must include at least hospitalId, subscriptionId, and one usage metric
 
-    if (!data.hospitalId) {
-      errors.push('Hospital ID is required');
-    }
+    const validation = schema.validate(data, { abortEarly: false });
 
-    if (!data.subscriptionId) {
-      errors.push('Subscription ID is required');
-    }
-
-    if (data.doctorsCount !== undefined) {
-      if (!Number.isInteger(data.doctorsCount)) {
-        errors.push('Doctors count must be an integer');
-      }
-      if (data.doctorsCount < 0) {
-        errors.push('Doctors count cannot be negative');
-      }
-    }
-
-    if (data.smsUsed !== undefined) {
-      if (!Number.isInteger(data.smsUsed)) {
-        errors.push('SMS usage must be an integer');
-      }
-      if (data.smsUsed < 0) {
-        errors.push('SMS usage cannot be negative');
-      }
-    }
-
-    if (data.emailsUsed !== undefined) {
-      if (!Number.isInteger(data.emailsUsed)) {
-        errors.push('Email usage must be an integer');
-      }
-      if (data.emailsUsed < 0) {
-        errors.push('Email usage cannot be negative');
-      }
+    if (validation.error) {
+      return {
+        isValid: false,
+        errors: validation.error.details.map(err => err.message)
+      };
     }
 
     return {
-      isValid: errors.length === 0,
-      errors
+      isValid: true,
+      data: validation.value
     };
   }
 }

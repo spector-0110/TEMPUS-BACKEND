@@ -1,7 +1,5 @@
 const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
-const rabbitmqService = require('../../services/rabbitmq.service');
-const subscriptionValidator = require('./subscription.validator');
 const { 
   CACHE_KEYS, 
   CACHE_EXPIRY, 
@@ -10,10 +8,12 @@ const {
   BILLING_CYCLE 
 } = require('./subscription.constants');
 
+const subscriptionValidator = require('./subscription.validator');
+const rabbitmqService = require('../../services/rabbitmq.service');
+
 class SubscriptionService {
-  constructor() {
-    this.setupSubscriptionQueue();
-  }
+
+  // Methods for subscription management
 
   async setupSubscriptionQueue() {
     try {
@@ -62,6 +62,34 @@ class SubscriptionService {
     await this.notifyPlanUpdate('PLAN_CREATED', newPlan);
 
     return newPlan;
+  }
+
+  async getAllPlans() {
+    // Try to get plans from Redis cache first
+    let plans = await redisService.getCache(CACHE_KEYS.SUBSCRIPTION_PLANS);
+    
+    if (!plans) {
+      // If not in cache, fetch from database
+      plans = await this.fetchPlansFromDB();
+
+      if (plans?.length > 0) {
+        // Store in cache if we got plans
+        await this.updatePlansCache(plans);
+      }
+    }
+
+    return plans;
+  }
+
+  async getFreePlan() {
+    const freePlan = await prisma.subscriptionPlan.findFirst({
+      where: {
+        isActive: true,
+        monthlyPrice: 0,
+        yearlyPrice: 0
+      }
+    });
+    return freePlan;
   }
 
   async updatePlan(planId, updateData) {
@@ -125,135 +153,219 @@ class SubscriptionService {
     return deletedPlan;
   }
 
-  async getAllPlans() {
-    // Try to get plans from Redis cache first
-    let plans = await redisService.getCache(CACHE_KEYS.SUBSCRIPTION_PLANS);
-    
-    if (!plans) {
-      // If not in cache, fetch from database
-      plans = await this.fetchPlansFromDB();
-
-      if (plans?.length > 0) {
-        // Store in cache if we got plans
-        await this.updatePlansCache(plans);
-      }
+  // Hospital Subscription Management
+  async assignFreePlanToHospital(hospitalId) {
+    const freePlan = await this.getFreePlan();
+    if (!freePlan) {
+      throw new Error('Free plan not found in the system');
     }
 
-    return plans;
-  }
+    const startDate = new Date();
+    const endDate = new Date();
+    endDate.setMonth(endDate.getMonth() + 1); // 1 month trial
 
-  async createHospitalSubscription(subscriptionData) {
-    const validationResult = subscriptionValidator.validateSubscriptionData(subscriptionData);
-    if (!validationResult.isValid) {
-      throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
-    }
-
-    // Set default values
-    const now = new Date();
-    const startDate = subscriptionData.startDate ? new Date(subscriptionData.startDate) : now;
-    const endDate = subscriptionData.endDate ? new Date(subscriptionData.endDate) : 
-      new Date(startDate.setMonth(startDate.getMonth() + (subscriptionData.billingCycle === BILLING_CYCLE.YEARLY ? 12 : 1)));
-
-    const subscription = await prisma.$transaction(async (tx) => {
-      // Check if hospital already has an active subscription
-      const existingSubscription = await tx.hospitalSubscription.findFirst({
-        where: {
-          hospitalId: subscriptionData.hospitalId,
-          status: SUBSCRIPTION_STATUS.ACTIVE,
-          endDate: { gt: now }
-        }
-      });
-
-      if (existingSubscription) {
-        throw new Error('Hospital already has an active subscription');
-      }
-
-      return await tx.hospitalSubscription.create({
-        data: {
-          ...subscriptionData,
-          status: SUBSCRIPTION_STATUS.ACTIVE,
-          startDate,
-          endDate,
-          smsCredits: DEFAULT_CREDITS.SMS,
-          emailCredits: DEFAULT_CREDITS.EMAIL
-        }
-      });
+    return await this.createOrUpdateSubscription({
+      hospitalId,
+      planId: freePlan.id,
+      plan: freePlan,
+      startDate,
+      endDate,
+      status: SUBSCRIPTION_STATUS.ACTIVE,
+      billingCycle: BILLING_CYCLE.MONTHLY,
+      isNewSubscription: true
     });
-
-    // Invalidate hospital subscription cache
-    await this.invalidateHospitalSubscriptionCache(subscriptionData.hospitalId);
-
-    return subscription;
-  }
-
-  async updateSubscriptionStatus(subscriptionId, status) {
-    if (!Object.values(SUBSCRIPTION_STATUS).includes(status)) {
-      throw new Error('Invalid subscription status');
-    }
-
-    const subscription = await prisma.hospitalSubscription.update({
-      where: { id: subscriptionId },
-      data: { status }
-    });
-
-    // Invalidate hospital subscription cache
-    await this.invalidateHospitalSubscriptionCache(subscription.hospitalId);
-
-    return subscription;
   }
 
   async getHospitalSubscription(hospitalId) {
-    const cacheKey = CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId;
-    
-    // Try cache first
-    let subscription = await redisService.getCache(cacheKey);
-    
-    if (!subscription) {
-      subscription = await prisma.hospitalSubscription.findFirst({
-        where: {
-          hospitalId,
-          status: SUBSCRIPTION_STATUS.ACTIVE,
-          endDate: { gt: new Date() }
-        },
-        include: {
-          plan: {
-            select: {
-              name: true,
-              maxDoctors: true,
-              features: true
-            }
+    return await prisma.hospitalSubscription.findFirst({
+      where: { 
+        hospitalId,
+        status: SUBSCRIPTION_STATUS.ACTIVE
+      },
+      include: {
+        plan: true
+      }
+    });
+  }
+
+  async upgradePlan(hospitalId, newPlanId, billingCycle) {
+    const [currentSub, newPlan] = await Promise.all([
+      this.getHospitalSubscription(hospitalId),
+      prisma.subscriptionPlan.findUnique({ where: { id: newPlanId } })
+    ]);
+
+    if (!currentSub) {
+      throw new Error('No active subscription found');
+    }
+    if (!newPlan) {
+      throw new Error('New plan not found');
+    }
+
+    const startDate = new Date();
+    const endDate = new Date();
+    if (billingCycle === BILLING_CYCLE.MONTHLY) {
+      endDate.setMonth(endDate.getMonth() + 1);
+    } else {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    }
+
+    return await this.createOrUpdateSubscription({
+      hospitalId,
+      planId: newPlan.id,
+      plan: newPlan,
+      startDate,
+      endDate,
+      status: SUBSCRIPTION_STATUS.ACTIVE,
+      billingCycle,
+      existingSubscriptionId: currentSub.id
+    });
+  }
+async renewSubscription(hospitalId, billingCycle) {
+    const currentSub = await this.getHospitalSubscription(hospitalId);
+    if (!currentSub) {
+      throw new Error('No active subscription found');
+    }
+
+    const startDate = new Date();
+    const endDate = new Date();
+    if (billingCycle === BILLING_CYCLE.MONTHLY) {
+      endDate.setMonth(endDate.getMonth() + 1);
+    } else {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    }
+
+    return await this.createOrUpdateSubscription({
+      hospitalId,
+      planId: currentSub.plan.id,
+      plan: currentSub.plan,
+      startDate,
+      endDate,
+      status: SUBSCRIPTION_STATUS.ACTIVE,
+      billingCycle,
+      existingSubscriptionId: currentSub.id
+    });
+  }
+// Subscription History
+async getSubscriptionHistory(hospitalId) {
+    return await prisma.subscriptionHistory.findMany({
+      where: { hospitalId },
+      include: { plan: true },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  // Helper Methods
+  async createOrUpdateSubscription({
+    hospitalId,
+    planId,
+    plan,
+    startDate,
+    endDate,
+    status,
+    billingCycle,
+    existingSubscriptionId = null,
+    isNewSubscription = false
+  }) {
+    return await prisma.$transaction(async (tx) => {
+
+      if (!plan) {
+        throw new Error('Subscription plan not found');
+      }
+
+      // Take a snapshot of current plan features
+      const planFeatures = plan.features;
+
+      let subscription;
+      if (existingSubscriptionId) {
+        // Update existing subscription
+        subscription = await tx.hospitalSubscription.update({
+          where: { id: existingSubscriptionId },
+          data: {
+            planId,
+            startDate,
+            endDate,
+            status,
+            billingCycle,
+            planFeatures,
+            autoRenew: true
           }
-        }
+        });
+      } else {
+        // Create new subscription
+        subscription = await tx.hospitalSubscription.create({
+          data: {
+            hospitalId,
+            planId,
+            billingCycle,
+            startDate,
+            endDate,
+            status,
+            planFeatures,
+            autoRenew: true
+          }
+        });
+      }
+
+      // Create subscription history entry
+      if (isNewSubscription || existingSubscriptionId) {
+        const price = billingCycle === BILLING_CYCLE.MONTHLY ? plan.monthlyPrice : plan.yearlyPrice;
+        await tx.subscriptionHistory.create({
+          data: {
+            subscriptionId: subscription.id,
+            hospitalId,
+            planId,
+            billingCycle,
+            priceAtTime: price,
+            startDate,
+            endDate,
+            status,
+            planFeatures,
+            createdAt: new Date()
+          }
+        });
+      }
+
+      return subscription;
+    });
+  }
+
+  async updateSubscriptionStatusAndHistory(subscriptionId, newStatus, existingSubscription = null) {
+    const subscription = existingSubscription || await prisma.hospitalSubscription.findUnique({
+      where: { id: subscriptionId },
+      include: { plan: true }
+    });
+
+    if (!subscription) {
+      throw new Error('Subscription not found');
+    }
+
+    return await prisma.$transaction(async (tx) => {
+      // Update subscription status
+      const updatedSubscription = await tx.hospitalSubscription.update({
+        where: { id: subscriptionId },
+        data: { status: newStatus }
       });
 
-      if (subscription) {
-        await redisService.setCache(cacheKey, subscription, CACHE_EXPIRY.HOSPITAL_SUBSCRIPTION);
+      // Create history entry only for terminal states (EXPIRED, CANCELLED)
+      if ([SUBSCRIPTION_STATUS.EXPIRED, SUBSCRIPTION_STATUS.CANCELLED].includes(newStatus)) {
+        await tx.subscriptionHistory.create({
+          data: {
+            subscriptionId,
+            hospitalId: subscription.hospitalId,
+            planId: subscription.planId,
+            billingCycle: subscription.billingCycle,
+            priceAtTime: subscription.billingCycle === BILLING_CYCLE.MONTHLY ? 
+              subscription.plan.monthlyPrice : 
+              subscription.plan.yearlyPrice,
+            startDate: subscription.startDate,
+            endDate: subscription.endDate,
+            status: newStatus,
+            planFeatures: subscription.planFeatures
+          }
+        });
       }
-    }
 
-    return subscription;
-  }
-
-  async updateUsageStats(usageData) {
-    const validationResult = subscriptionValidator.validateUsageUpdate(usageData);
-    if (!validationResult.isValid) {
-      throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
-    }
-
-    const { hospitalId, ...stats } = usageData;
-    const cacheKey = CACHE_KEYS.USAGE_STATS + hospitalId;
-
-    await redisService.setCache(cacheKey, {
-      ...stats,
-      lastUpdated: new Date()
-    }, CACHE_EXPIRY.USAGE_STATS);
-  }
-
-  // Helper methods
-  async fetchPlansFromDB() {
-    return await prisma.subscriptionPlan.findMany({
-      where: { isActive: true },
-      orderBy: { monthlyPrice: 'asc' }
+      return updatedSubscription;
     });
   }
 
@@ -263,6 +375,25 @@ class SubscriptionService {
       plans, 
       CACHE_EXPIRY.SUBSCRIPTION_PLANS
     );
+  }
+
+  async notifyPlanUpdate(type, plan) {
+    try {
+      await rabbitmqService.publishToQueue('subscription_updates', {
+        type,
+        plan,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error notifying plan update:', error);
+    }
+  }
+
+  async fetchPlansFromDB() {
+    return await prisma.subscriptionPlan.findMany({
+      where: { isActive: true },
+      orderBy: { monthlyPrice: 'asc' }
+    });
   }
 
   async invalidateAndRefreshCache() {
@@ -278,21 +409,10 @@ class SubscriptionService {
     }
   }
 
-  async invalidateHospitalSubscriptionCache(hospitalId) {
-    await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
-  }
+  // async invalidateHospitalSubscriptionCache(hospitalId) {
+  //   await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
+  // }
 
-  async notifyPlanUpdate(type, plan) {
-    try {
-      await rabbitmqService.publishToQueue('subscription_updates', {
-        type,
-        plan,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Error notifying plan update:', error);
-    }
-  }
 }
 
 module.exports = new SubscriptionService();

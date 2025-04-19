@@ -5,7 +5,7 @@ const redisService = require('./src/services/redis.service');
 const rabbitmqService = require('./src/services/rabbitmq.service');
 const supabase = require('./src/config/supabase.config');
 const { testConnection, disconnect } = require('./src/services/database.service');
-const messageProcessor = require('./src/queue/messageProcessor');
+const subscriptionCronService = require('./src/modules/subscription/subscription.cron');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
 const patientRoutes = require('./src/routes/patient.routes');
@@ -155,7 +155,8 @@ async function shutdown(signal) {
     http: false,
     redis: false,
     rabbitmq: false,
-    database: false
+    database: false,
+    cron: false
   };
 
   // Set a timeout for shutdown
@@ -173,6 +174,12 @@ async function shutdown(signal) {
       shutdownStatus.http = true;
       console.log('HTTP server closed');
     }
+
+    // Stop cron jobs
+    console.log('Stopping cron jobs...');
+    subscriptionCronService.stopCronJobs();
+    shutdownStatus.cron = true;
+    console.log('Cron jobs stopped');
 
     // Cleanup services in parallel with individual timeouts
     await Promise.all([
@@ -228,12 +235,16 @@ let server;
 async function startServer() {
   try {
     await initializeServices();
-    
+    //start cron jobs
+    subscriptionCronService.startCronJobs();
     server = app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
-      
+      console.log('✅ Subscription cron jobs started');
+
+
       // Log service configuration
       console.log('Service Configuration:', {
+        
         redisClusterMode: process.env.REDIS_CLUSTER_MODE === 'true',
         redisPoolSize: process.env.REDIS_POOL_SIZE,
         rabbitMQNodes: process.env.RABBITMQ_CLUSTER_NODES?.split(',').length || 1,

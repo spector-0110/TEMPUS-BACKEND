@@ -7,6 +7,7 @@ const subscriptionService = require('../subscription/subscription.service');
 const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS } = require('./doctor.constants');
 
 class DoctorService {
+  
   async createDoctor(hospitalId, doctorData) {
     // Check doctor limit from subscription
     const subscription = await subscriptionService.getHospitalSubscription(hospitalId);
@@ -14,8 +15,14 @@ class DoctorService {
       throw new Error('No active subscription found');
     }
 
+    // Get the current features from the subscription
+    const features = subscription.planFeatures;
+    if (!features?.max_doctors) {
+      throw new Error('Invalid subscription plan features');
+    }
+
     const currentDoctorCount = await prisma.doctor.count({ where: { hospitalId } });
-    if (currentDoctorCount >= subscription.plan.maxDoctors) {
+    if (currentDoctorCount >= features.max_doctors) {
       throw new Error('Doctor limit reached for current subscription plan');
     }
 

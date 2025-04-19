@@ -7,12 +7,14 @@ const superAdminMiddleware = require('../middleware/superadmin.middleware');
 // Public route for getting subscription plans
 router.get('/plans', subscriptionController.getAllPlans);
 
-// Routes that require authentication
-router.use(authMiddleware);
+// Protected routes
+// router.use(authMiddleware);
 
-// Hospital subscription routes
-router.post('/subscribe', subscriptionController.createSubscription);
-router.get('/current', subscriptionController.getHospitalSubscription);
+// Hospital subscription management
+router.get('/current',authMiddleware, subscriptionController.getHospitalSubscription);
+router.get('/history',authMiddleware, subscriptionController.getSubscriptionHistory);
+router.post('/upgrade',authMiddleware, subscriptionController.upgradePlan);
+router.post('/renew',authMiddleware, subscriptionController.renewSubscription);
 
 // Super admin only routes - protected by superadmin middleware
 router.use(superAdminMiddleware);
@@ -21,9 +23,6 @@ router.use(superAdminMiddleware);
 router.post('/plans', subscriptionController.createPlan);
 router.put('/plans/:id', subscriptionController.updatePlan);
 router.delete('/plans/:id', subscriptionController.deletePlan);
-
-// Subscription status management
-router.put('/subscriptions/:id/status', subscriptionController.updateSubscriptionStatus);
 
 // Cache management
 router.post('/refresh-cache', subscriptionController.refreshCache);

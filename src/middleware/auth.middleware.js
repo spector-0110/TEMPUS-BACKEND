@@ -14,7 +14,7 @@ const authMiddleware = async (req, res, next) => {
     if (error || !user) {
       return res.status(401).json({ error: 'Invalid token' });
     }
-
+    
     // Check if this is the initial registration route
     const isInitialRegistration = req.path.endsWith('/initial-details');
     

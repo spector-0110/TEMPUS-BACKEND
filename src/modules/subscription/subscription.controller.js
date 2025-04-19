@@ -7,9 +7,10 @@ class SubscriptionController {
     this.createPlan = this.createPlan.bind(this);
     this.updatePlan = this.updatePlan.bind(this);
     this.deletePlan = this.deletePlan.bind(this);
-    this.createSubscription = this.createSubscription.bind(this);
     this.getHospitalSubscription = this.getHospitalSubscription.bind(this);
-    this.updateSubscriptionStatus = this.updateSubscriptionStatus.bind(this);
+    this.getSubscriptionHistory = this.getSubscriptionHistory.bind(this);
+    this.upgradePlan = this.upgradePlan.bind(this);
+    this.renewSubscription = this.renewSubscription.bind(this);
     this.refreshCache = this.refreshCache.bind(this);
   }
 
@@ -31,7 +32,6 @@ class SubscriptionController {
   async createPlan(req, res) {
     try {
       const newPlan = await subscriptionService.createPlan(req.body);
-
       return res.status(201).json(newPlan);
     } catch (error) {
       console.error('Error creating subscription plan:', error);
@@ -92,38 +92,10 @@ class SubscriptionController {
     }
   }
 
-  async createSubscription(req, res) {
-    try {
-      const subscription = await subscriptionService.createHospitalSubscription({
-        ...req.body,
-        hospitalId: req.user.hospital_id
-      });
-
-      return res.status(201).json(subscription);
-    } catch (error) {
-      console.error('Error creating hospital subscription:', error);
-
-      if (error.message === 'Hospital already has an active subscription') {
-        return res.status(400).json({ error: error.message });
-      }
-
-      if (error.validationErrors) {
-        return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
-        });
-      }
-
-      return res.status(500).json({ error: 'Failed to create subscription' });
-    }
-  }
-
   async getHospitalSubscription(req, res) {
     try {
-      const subscription = await subscriptionService.getHospitalSubscription(
-        req.user.hospital_id
-      );
-
+      const subscription = await subscriptionService.getHospitalSubscription(req.user.hospital_id);
+      
       if (!subscription) {
         return res.status(404).json({ error: 'No active subscription found' });
       }
@@ -135,29 +107,77 @@ class SubscriptionController {
     }
   }
 
-  async updateSubscriptionStatus(req, res) {
+  async getSubscriptionHistory(req, res) {
     try {
-      const { id } = req.params;
-      const { status } = req.body;
+      const history = await subscriptionService.getSubscriptionHistory(req.user.hospital_id);
+      return res.json(history);
+    } catch (error) {
+      console.error('Error fetching subscription history:', error);
+      return res.status(500).json({ error: 'Failed to fetch subscription history' });
+    }
+  }
 
-      const subscription = await subscriptionService.updateSubscriptionStatus(id, status);
+  async upgradePlan(req, res) {
+    try {
+      const { planId, billingCycle } = req.body;
+
+      if (!planId || !billingCycle) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Plan ID and billing cycle are required'
+        });
+      }
+
+      const newSubscription = await subscriptionService.upgradePlan(
+        req.user.hospital_id,
+        planId,
+        billingCycle
+      );
 
       return res.json({
-        message: 'Subscription status updated successfully',
-        subscription
+        message: 'Plan upgraded successfully',
+        subscription: newSubscription
       });
     } catch (error) {
-      console.error('Error updating subscription status:', error);
+      console.error('Error upgrading subscription plan:', error);
 
-      if (error.message === 'Invalid subscription status') {
-        return res.status(400).json({ error: error.message });
+      if (error.message === 'No active subscription found' || 
+          error.message === 'New plan not found') {
+        return res.status(404).json({ error: error.message });
       }
 
-      if (error.code === 'P2025') {
-        return res.status(404).json({ error: 'Subscription not found' });
+      return res.status(500).json({ error: 'Failed to upgrade subscription plan' });
+    }
+  }
+
+  async renewSubscription(req, res) {
+    try {
+      const { billingCycle } = req.body;
+
+      if (!billingCycle) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Billing cycle is required'
+        });
       }
 
-      return res.status(500).json({ error: 'Failed to update subscription status' });
+      const renewedSubscription = await subscriptionService.renewSubscription(
+        req.user.hospital_id,
+        billingCycle
+      );
+
+      return res.json({
+        message: 'Subscription renewed successfully',
+        subscription: renewedSubscription
+      });
+    } catch (error) {
+      console.error('Error renewing subscription:', error);
+
+      if (error.message === 'No active subscription found') {
+        return res.status(404).json({ error: error.message });
+      }
+
+      return res.status(500).json({ error: 'Failed to renew subscription' });
     }
   }
 
