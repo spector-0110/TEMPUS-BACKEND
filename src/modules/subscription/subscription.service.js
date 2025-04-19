@@ -154,7 +154,7 @@ class SubscriptionService {
   }
 
   // Hospital Subscription Management
-  async assignFreePlanToHospital(hospitalId) {
+  async assignFreePlanToHospital(tx,hospitalId) {
     const freePlan = await this.getFreePlan();
     if (!freePlan) {
       throw new Error('Free plan not found in the system');
@@ -165,6 +165,7 @@ class SubscriptionService {
     endDate.setMonth(endDate.getMonth() + 1); // 1 month trial
 
     return await this.createOrUpdateSubscription({
+      tx,
       hospitalId,
       planId: freePlan.id,
       plan: freePlan,
@@ -256,6 +257,7 @@ async getSubscriptionHistory(hospitalId) {
 
   // Helper Methods
   async createOrUpdateSubscription({
+    tx: passedTx,
     hospitalId,
     planId,
     plan,
@@ -266,8 +268,7 @@ async getSubscriptionHistory(hospitalId) {
     existingSubscriptionId = null,
     isNewSubscription = false
   }) {
-    return await prisma.$transaction(async (tx) => {
-
+    const operation = async (tx) => {
       if (!plan) {
         throw new Error('Subscription plan not found');
       }
@@ -326,7 +327,10 @@ async getSubscriptionHistory(hospitalId) {
       }
 
       return subscription;
-    });
+    };
+
+    // Use passed transaction if available, otherwise create new one
+    return passedTx ? operation(passedTx) : await prisma.$transaction(operation);
   }
 
   async updateSubscriptionStatusAndHistory(subscriptionId, newStatus, existingSubscription = null) {

@@ -9,41 +9,45 @@ class MessageProcessor {
   }
 
   async initialize() {
-    // Initialize RabbitMQ service
-    await this.rabbitmqService.initialize();
+    try {
+      // Initialize RabbitMQ service if not already initialized
+      await this.rabbitmqService.initialize();
 
-    // Create queues with proper options
-    await this.rabbitmqService.createQueue('tasks', {
-      deadLetterExchange: true,
-      maxLength: 100000
-    });
+      // Create queues with proper configuration and error handling
+      const queues = {
+        'tasks': { maxLength: 100000 },
+        'notifications': { maxLength: 500000 },
+        'email_notifications': { maxLength: 100000 },
+        'sms_notifications': { maxLength: 100000 }
+      };
 
-    await this.rabbitmqService.createQueue('notifications', {
-      deadLetterExchange: true,
-      maxLength: 500000
-    });
+      // Create all queues with proper error handling
+      for (const [queueName, options] of Object.entries(queues)) {
+        try {
+          await this.rabbitmqService.createQueue(queueName, {
+            deadLetterExchange: true,
+            ...options
+          });
+        } catch (error) {
+          if (!error.message.includes('already exists')) {
+            throw error;
+          }
+        }
+      }
 
-    await this.rabbitmqService.createQueue('email_notifications', {
-      deadLetterExchange: true,
-      maxLength: 100000
-    });
+      // Set up consumers only after queues are created
+      await Promise.all([
+        this.setupTaskConsumer(),
+        this.setupNotificationConsumer(),
+        this.setupEmailConsumer(),
+        this.setupSMSConsumer()
+      ]);
 
-    await this.rabbitmqService.createQueue('sms_notifications', {
-      deadLetterExchange: true,
-      maxLength: 100000
-    });
-
-    await this.rabbitmqService.createQueue('whatsapp_notifications', {
-      deadLetterExchange: true,
-      maxLength: 100000
-    });
-
-    // Set up consumers
-    await this.setupTaskConsumer();
-    await this.setupNotificationConsumer();
-    await this.setupEmailConsumer();
-    await this.setupSMSConsumer();
-    await this.setupWhatsAppConsumer();
+      this.initialized = true;
+    } catch (error) {
+      console.error('Failed to initialize message processor:', error);
+      throw error;
+    }
   }
 
   async setupTaskConsumer() {
@@ -146,11 +150,22 @@ class MessageProcessor {
   async publishNotification(notificationData) {
     if (!this.initialized) {
       await this.initialize();
-      this.initialized = true;
     }
 
     const { type, ...data } = notificationData;
-    const queueName = type.toLowerCase() === 'email' ? 'email_notifications' : 'sms_notifications';
+    let queueName;
+    
+    // Map notification type to appropriate queue
+    switch(type.toLowerCase()) {
+      case 'email':
+        queueName = 'email_notifications';
+        break;
+      case 'sms':
+        queueName = 'sms_notifications';
+        break;
+      default:
+        throw new Error(`Unsupported notification type: ${type}`);
+    }
     
     const messageId = await this.rabbitmqService.publishToQueue(queueName, {
       id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

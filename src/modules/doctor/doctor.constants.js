@@ -15,10 +15,19 @@ const CACHE_EXPIRY = {
   DOCTOR_SCHEDULE: 15 * 60 // 15 minutes
 };
 
+const today = new Date();
+
+const toTime = (timeStr) => {
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  const date = new Date(today);
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+};
+
 const DEFAULT_SCHEDULE = {
-  startTime: '09:00',
-  endTime: '17:00',
-  lunchTime: '13:00',
+  startTime: toTime('09:00'),
+  endTime: toTime('17:00'),
+  lunchTime: toTime('13:00'),
   avgConsultationTimeMinutes: 15
 };
 

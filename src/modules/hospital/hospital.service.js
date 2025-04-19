@@ -59,7 +59,7 @@ class HospitalService {
       });
 
       // Assign free plan subscription
-      const subscription = await subscriptionService.assignFreePlanToHospital(hospital.id);
+      const subscription = await subscriptionService.assignFreePlanToHospital(tx, hospital.id);
 
       // Queue welcome email
       await messageProcessor.publishNotification({
@@ -96,7 +96,7 @@ class HospitalService {
         `
       });
 
-      return hospital;
+      return {...hospital,subscription};
     });
   }
 

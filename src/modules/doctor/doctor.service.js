@@ -7,7 +7,7 @@ const subscriptionService = require('../subscription/subscription.service');
 const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS } = require('./doctor.constants');
 
 class DoctorService {
-  
+
   async createDoctor(hospitalId, doctorData) {
     // Check doctor limit from subscription
     const subscription = await subscriptionService.getHospitalSubscription(hospitalId);
@@ -73,6 +73,7 @@ class DoctorService {
 
   async updateDoctorDetails(hospitalId, doctorId, updateData) {
     // Validate update data
+    
     const validationResult = doctorValidator.validateCreateDoctorData(updateData);
     if (!validationResult.isValid) {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
@@ -260,30 +261,6 @@ class DoctorService {
     const doctors = await prisma.doctor.findMany({
       where: { 
         hospitalId 
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        specialization: true,
-        qualification: true,
-        experience: true,
-        photo: true,
-        status: true,
-        schedules: {
-          select: {
-            dayOfWeek: true,
-            startTime: true,
-            endTime: true,
-            lunchTime: true,
-            status: true,
-            avgConsultationTimeMinutes: true
-          }
-        }
-      },
-      orderBy: {
-        name: 'asc'
       }
     });
 
