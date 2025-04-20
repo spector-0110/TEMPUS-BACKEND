@@ -44,14 +44,13 @@ class SubscriptionCronService {
           endDate: { lt: now }
         },
         include: {
-          hospital: true,
-          plan: true
+          hospital: true
         }
       });
 
       for (const subscription of expiredSubscriptions) {
-        await subscriptionService.updateSubscriptionStatusAndHistory(
-          subscription.id, 
+        await subscriptionService.updateSubscriptionStatus(
+          subscription, 
           SUBSCRIPTION_STATUS.EXPIRED
         );
         await this.sendExpirationEmail(subscription);
@@ -79,8 +78,7 @@ class SubscriptionCronService {
           }
         },
         include: {
-          hospital: true,
-          plan: true
+          hospital: true
         }
       });
 
@@ -98,7 +96,7 @@ class SubscriptionCronService {
 
   async sendWarningEmail(subscription) {
     const daysToExpiry = Math.ceil((subscription.endDate - new Date()) / (1000 * 60 * 60 * 24));
-    const features = subscription.planFeatures;
+    const totalPrice = subscription.pricePerDoctor * subscription.doctorCount;
     
     const emailContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -106,31 +104,24 @@ class SubscriptionCronService {
         <p>Dear ${subscription.hospital.name} Administrator,</p>
         
         <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          <p><strong>Plan:</strong> ${subscription.plan.name}</p>
-          <p><strong>Expires in:</strong> ${daysToExpiry} days</p>
-          <p><strong>Expiry Date:</strong> ${subscription.endDate.toLocaleDateString()}</p>
-          
-          <div style="margin-top: 15px;">
-            <p><strong>Current Plan Features:</strong></p>
-            <ul>
-              <li>Maximum Doctors: ${features.max_doctors}</li>
-              <li>SMS Credits: ${features.base_sms_credits}</li>
-              <li>Email Credits: ${features.base_email_credits}</li>
-              ${features.analytics_access ? '<li>Analytics Access</li>' : ''}
-              ${features.reporting_access ? '<li>Reporting Access</li>' : ''}
-              ${features.premium_support ? '<li>Premium Support</li>' : ''}
-              ${features.custom_branding ? '<li>Custom Branding</li>' : ''}
-            </ul>
-          </div>
+          <p><strong>Subscription Details:</strong></p>
+          <ul>
+            <li>Active Doctors: ${subscription.doctorCount}</li>
+            <li>Price per Doctor: ${subscription.pricePerDoctor}</li>
+            <li>Total Price: ${totalPrice}</li>
+            <li>Billing Cycle: ${subscription.billingCycle}</li>
+            <li>Expires in: ${daysToExpiry} days</li>
+            <li>Expiry Date: ${subscription.endDate.toLocaleDateString()}</li>
+          </ul>
         </div>
 
-        <p>To maintain uninterrupted service and keep these features, please renew your subscription before expiry.</p>
+        <p>To maintain uninterrupted service, please renew your subscription before expiry.</p>
         
         <div style="margin: 20px 0;">
           <p><strong>Options:</strong></p>
           <ul>
-            <li>Renew your current plan</li>
-            <li>Upgrade to a different plan</li>
+            <li>Renew your subscription</li>
+            <li>Adjust doctor count if needed</li>
             <li>Contact support for assistance</li>
           </ul>
         </div>
@@ -146,37 +137,31 @@ class SubscriptionCronService {
   }
 
   async sendExpirationEmail(subscription) {
-    const features = subscription.planFeatures;
+    const totalPrice = subscription.pricePerDoctor * subscription.doctorCount;
+    
     const emailContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #dc2626;">Subscription Expired</h2>
         <p>Dear ${subscription.hospital.name} Administrator,</p>
         
         <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          <p><strong>Plan:</strong> ${subscription.plan.name}</p>
-          <p><strong>Expired on:</strong> ${subscription.endDate.toLocaleDateString()}</p>
-          
-          <div style="margin-top: 15px;">
-            <p><strong>Previously Active Features:</strong></p>
-            <ul>
-              <li>Maximum Doctors: ${features.max_doctors}</li>
-              <li>SMS Credits: ${features.base_sms_credits}</li>
-              <li>Email Credits: ${features.base_email_credits}</li>
-              ${features.analytics_access ? '<li>Analytics Access</li>' : ''}
-              ${features.reporting_access ? '<li>Reporting Access</li>' : ''}
-              ${features.premium_support ? '<li>Premium Support</li>' : ''}
-              ${features.custom_branding ? '<li>Custom Branding</li>' : ''}
-            </ul>
-          </div>
+          <p><strong>Subscription Details:</strong></p>
+          <ul>
+            <li>Active Doctors: ${subscription.doctorCount}</li>
+            <li>Price per Doctor: ${subscription.pricePerDoctor}</li>
+            <li>Total Price: ${totalPrice}</li>
+            <li>Billing Cycle: ${subscription.billingCycle}</li>
+            <li>Expired on: ${subscription.endDate.toLocaleDateString()}</li>
+          </ul>
         </div>
 
-        <p style="color: #dc2626;"><strong>Important:</strong> Your access to premium features has been limited.</p>
+        <p style="color: #dc2626;"><strong>Important:</strong> Your subscription has expired. Please renew to restore access.</p>
         
         <div style="margin: 20px 0;">
-          <p>To restore full access:</p>
+          <p><strong>To restore access:</strong></p>
           <ul>
             <li>Renew your subscription</li>
-            <li>Upgrade to a different plan</li>
+            <li>Adjust doctor count if needed</li>
             <li>Contact our support team for assistance</li>
           </ul>
         </div>

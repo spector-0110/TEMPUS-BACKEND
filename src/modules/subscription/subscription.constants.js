@@ -10,65 +10,78 @@ const BILLING_CYCLE = {
   YEARLY: 'YEARLY'
 };
 
+const MESSAGE_STATUS = {
+  PENDING: 'PENDING',
+  SENT: 'SENT',
+  FAILED: 'FAILED'
+};
+
+const MESSAGE_TYPE = {
+  SMS: 'SMS',
+  EMAIL: 'EMAIL'
+};
+
+const MESSAGE_TEMPLATE = {
+  OTP: 'OTP',
+  APPOINTMENT_REMINDER: 'APPOINTMENT_REMINDER',
+  SUBSCRIPTION_NOTIFICATION: 'SUBSCRIPTION_NOTIFICATION',
+  GENERAL_NOTIFICATION: 'GENERAL_NOTIFICATION'
+};
+
 const CACHE_KEYS = {
-  SUBSCRIPTION_PLANS: 'subscription:plans',
   HOSPITAL_SUBSCRIPTION: 'subscription:hospital:', // Append hospitalId
-  USAGE_STATS: 'subscription:usage:' // Append hospitalId
+  USAGE_STATS: 'usage:hospital:', // Append hospitalId
+  MESSAGE_QUOTA: 'message:quota:' // Append hospitalId
 };
 
 const CACHE_EXPIRY = {
-  SUBSCRIPTION_PLANS: 24 * 60 * 60, // 24 hours
   HOSPITAL_SUBSCRIPTION: 30 * 60, // 30 minutes
-  USAGE_STATS: 5 * 60 // 5 minutes
+  USAGE_STATS: 5 * 60, // 5 minutes
+  MESSAGE_QUOTA: 5 * 60 // 5 minutes
 };
 
-const DEFAULT_CREDITS = {
-  SMS: 1000,
-  EMAIL: 5000
+// Messages per doctor per month
+const MESSAGE_QUOTA_PER_DOCTOR = {
+  SMS: 100,
+  EMAIL: 500
 };
 
-const FEATURE_LIMITS = {
+const PRICING = {
+  BASE_PRICE_PER_DOCTOR: 5999, // Base price per doctor
+  YEARLY_DISCOUNT_PERCENTAGE: 20, // 20% discount for yearly billing
+  VOLUME_DISCOUNTS: [
+    { minDoctors: 5, discount: 5 }, // 5% off for 5+ doctors
+    { minDoctors: 10, discount: 10 }, // 10% off for 10+ doctors
+    { minDoctors: 20, discount: 15 }, // 15% off for 20+ doctors
+    { minDoctors: 50, discount: 20 }, // 20% off for 50+ doctors
+  ]
+};
+
+const MESSAGE_COSTS = {
+  SMS: 1.0, // Cost per SMS
+  EMAIL: 0.5 // Cost per email
+};
+
+const LIMITS = {
   MIN_DOCTORS: 1,
-  MAX_DOCTORS: 100,
-  MIN_SMS_CREDITS: 0,
-  MAX_SMS_CREDITS: 100000,
-  MIN_EMAIL_CREDITS: 0,
-  MAX_EMAIL_CREDITS: 500000
+  MAX_DOCTORS: 1000,
+  MAX_RETRY_ATTEMPTS: 3,
+  MESSAGE_BATCH_SIZE: 100
 };
 
-const DEFAULT_FEATURES = {
-  max_doctors: 1,
-  base_sms_credits: 100,
-  base_email_credits: 500,
-  analytics_access: false,
-  reporting_access: false,
-  premium_support: false,
-  custom_branding: false,
-  additional_features: []
-};
-
-const ALLOWED_UPDATE_FIELDS = [
-  'name',
-  'description',
-  'monthlyPrice',
-  'yearlyPrice',
-  'features'
-];
-
-const MIN_SUBSCRIPTION_PRICE = 0;
-const MAX_DOCTORS_PER_PLAN = 1000;
 const SUBSCRIPTION_EXPIRY_WARNING_DAYS = 7;
 
 module.exports = {
   SUBSCRIPTION_STATUS,
   BILLING_CYCLE,
+  MESSAGE_STATUS,
+  MESSAGE_TYPE,
+  MESSAGE_TEMPLATE,
   CACHE_KEYS,
   CACHE_EXPIRY,
-  DEFAULT_CREDITS,
-  FEATURE_LIMITS,
-  DEFAULT_FEATURES,
-  ALLOWED_UPDATE_FIELDS,
-  MIN_SUBSCRIPTION_PRICE,
-  MAX_DOCTORS_PER_PLAN,
+  MESSAGE_QUOTA_PER_DOCTOR,
+  PRICING,
+  MESSAGE_COSTS,
+  LIMITS,
   SUBSCRIPTION_EXPIRY_WARNING_DAYS
 };

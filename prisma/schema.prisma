@@ -49,6 +49,24 @@ enum DoctorStatus {
   inactive
 }
 
+enum MessageStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum MessageType {
+  SMS
+  EMAIL
+}
+
+enum MessageTemplateType {
+  OTP
+  APPOINTMENT_REMINDER
+  SUBSCRIPTION_NOTIFICATION
+  GENERAL_NOTIFICATION
+}
+
 model Hospital {
   id                  String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   supabaseUserId      String?                @unique @map("supabase_user_id") @db.Uuid
@@ -67,38 +85,20 @@ model Hospital {
   subscriptions       HospitalSubscription[]
   subscriptionHistory SubscriptionHistory[]
   doctorSchedules     DoctorSchedule[]
+  messageLogs         MessageLog[]
+  messageQuotas       MessageQuota[]
 
   @@map("hospitals")
-}
-
-model SubscriptionPlan {
-  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name         String
-  description  String?
-  monthlyPrice Decimal   @map("monthly_price")
-  yearlyPrice  Decimal   @map("yearly_price")
-  features     Json // Includes max_doctors, sms_credits etc.
-  isActive     Boolean   @default(true) @map("is_active")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
-  deletedAt    DateTime? @map("deleted_at")
-
-  // Relations
-  hospitalSubscriptions HospitalSubscription[]
-  subscriptionHistory   SubscriptionHistory[]
-
-  @@index([isActive], name: "idx_subscription_plans_is_active")
-  @@map("subscription_plans")
 }
 
 model HospitalSubscription {
   id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   hospitalId     String             @map("hospital_id") @db.Uuid
-  planId         String             @map("plan_id") @db.Uuid
+  doctorCount    Int                @default(0) @map("doctor_count")
   billingCycle   BillingCycle       @map("billing_cycle")
   startDate      DateTime           @map("start_date")
   endDate        DateTime           @map("end_date")
-  planFeatures   Json               @map("plan_features")
+  totalPrice Decimal                @map("total_price")
   lastNotifiedAt DateTime?          @map("last_notified_at")
   autoRenew      Boolean            @default(true) @map("auto_renew")
   paymentMethod  String?            @map("payment_method")
@@ -109,7 +109,6 @@ model HospitalSubscription {
 
   // Relations
   hospital Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-  plan     SubscriptionPlan      @relation(fields: [planId], references: [id], onDelete: Restrict)
   history  SubscriptionHistory[]
 
   @@index([hospitalId], name: "idx_hospital_subscriptions_hospital_id")
@@ -121,13 +120,12 @@ model SubscriptionHistory {
   id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   subscriptionId String             @map("subscription_id") @db.Uuid
   hospitalId     String             @map("hospital_id") @db.Uuid
-  planId         String             @map("plan_id") @db.Uuid
+  doctorCount    Int                @map("doctor_count")
   billingCycle   BillingCycle       @map("billing_cycle")
-  priceAtTime    Decimal            @map("price_at_time")
+  pricePerDoctor Decimal            @map("price_per_doctor")
+  totalPrice     Decimal            @map("total_price")
   startDate      DateTime           @map("start_date")
   endDate        DateTime           @map("end_date")
-  status         SubscriptionStatus
-  planFeatures   Json               @map("plan_features")
   paymentMethod  String?            @map("payment_method")
   paymentDetails Json?              @map("payment_details")
   createdBy      String?            @map("created_by") @db.Uuid
@@ -136,7 +134,6 @@ model SubscriptionHistory {
   // Relations
   subscription HospitalSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   hospital     Hospital             @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-  plan         SubscriptionPlan     @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   @@index([subscriptionId], name: "idx_hospital_subscription_history_subscription_id")
   @@index([hospitalId], name: "idx_hospital_subscription_history_hospital_id")
@@ -222,4 +219,48 @@ model VisitNote {
   doctor      Doctor      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
 
   @@map("visit_notes")
+}
+
+model MessageLog {
+  id              String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hospitalId      String             @map("hospital_id") @db.Uuid
+  type            MessageType
+  status          MessageStatus      @default(PENDING)
+  recipient       String
+  subject         String?
+  messageBody     String             @map("message_body")
+  metadata        Json?
+  messageTemplate MessageTemplateType @map("message_template")
+  relatedId       String?            @map("related_id") @db.Uuid
+  cost            Decimal            @default(0)
+  retryCount      Int                @default(0) @map("retry_count")
+  errorMessage    String?            @map("error_message")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId], name: "idx_message_logs_hospital_id")
+  @@index([type, status], name: "idx_message_logs_type_status")
+  @@map("message_logs")
+}
+
+model MessageQuota {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hospitalId   String   @map("hospital_id") @db.Uuid
+  month        DateTime @db.Date
+  doctorCount  Int      @map("doctor_count")
+  smsQuota     Int      @map("sms_quota")
+  emailQuota   Int      @map("email_quota")
+  smsUsed      Int      @default(0) @map("sms_used")
+  emailUsed    Int      @default(0) @map("email_used")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  @@unique([hospitalId, month])
+  @@index([hospitalId], name: "idx_message_quota_hospital_id")
+  @@map("message_quotas")
 }

@@ -3,125 +3,11 @@ const subscriptionService = require('./subscription.service');
 class SubscriptionController {
   constructor() {
     // Bind methods to ensure correct 'this' context
-    this.getAllPlans = this.getAllPlans.bind(this);
-    this.createPlan = this.createPlan.bind(this);
-    this.updatePlan = this.updatePlan.bind(this);
-    this.deletePlan = this.deletePlan.bind(this);
     this.getHospitalSubscription = this.getHospitalSubscription.bind(this);
     this.getSubscriptionHistory = this.getSubscriptionHistory.bind(this);
-    this.upgradePlan = this.upgradePlan.bind(this);
+    this.createSubscription = this.createSubscription.bind(this);
+    this.updateDoctorCount = this.updateDoctorCount.bind(this);
     this.renewSubscription = this.renewSubscription.bind(this);
-    this.refreshCache = this.refreshCache.bind(this);
-  }
-
-  async getAllPlans(req, res) {
-    try {
-      const plans = await subscriptionService.getAllPlans();
-      
-      if (!plans?.length) {
-        return res.status(404).json({ error: 'No subscription plans found' });
-      }
-
-      return res.json(plans);
-    } catch (error) {
-      console.error('Error fetching subscription plans:', error);
-      return res.status(500).json({ error: 'Failed to fetch subscription plans' });
-    }
-  }
-
-  async createPlan(req, res) {
-    try {
-      if (!req.body || !Object.keys(req.body).length) {
-        return res.status(400).json({ 
-          error: 'Validation failed',
-          message: 'Plan data is required'
-        });
-      }
-
-      const newPlan = await subscriptionService.createPlan(req.body);
-      return res.status(201).json({
-        message: 'Subscription plan created successfully',
-        plan: newPlan
-      });
-    } catch (error) {
-      console.error('Error creating subscription plan:', error);
-
-      if (error.validationErrors) {
-        return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
-        });
-      }
-
-      if (error.code === 'P2002') {
-        return res.status(409).json({ 
-          error: 'Plan with this name already exists' 
-        });
-      }
-
-      return res.status(500).json({ error: 'Failed to create subscription plan' });
-    }
-  }
-
-  async updatePlan(req, res) {
-    try {
-      if (!req.body || !Object.keys(req.body).length) {
-        return res.status(400).json({ 
-          error: 'Validation failed',
-          message: 'Update data is required'
-        });
-      }
-
-      const updatedPlan = await subscriptionService.updatePlan(
-        req.params.id,
-        req.body
-      );
-
-      return res.json({
-        message: 'Subscription plan updated successfully',
-        plan: updatedPlan
-      });
-    } catch (error) {
-      console.error('Error updating subscription plan:', error);
-
-      if (error.validationErrors) {
-        return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
-        });
-      }
-
-      if (error.code === 'P2025') {
-        return res.status(404).json({ error: 'Subscription plan not found' });
-      }
-
-      if (error.code === 'P2002') {
-        return res.status(409).json({ 
-          error: 'Plan with this name already exists' 
-        });
-      }
-
-      return res.status(500).json({ error: 'Failed to update subscription plan' });
-    }
-  }
-
-  async deletePlan(req, res) {
-    try {
-      const deletedPlan = await subscriptionService.deletePlan(req.params.id);
-
-      return res.json({ 
-        message: 'Plan deactivated successfully',
-        planId: deletedPlan.id 
-      });
-    } catch (error) {
-      console.error('Error deleting subscription plan:', error);
-
-      if (error.code === 'P2025') {
-        return res.status(404).json({ error: 'Subscription plan not found' });
-      }
-
-      return res.status(500).json({ error: 'Failed to delete subscription plan' });
-    }
   }
 
   async getHospitalSubscription(req, res) {
@@ -149,47 +35,68 @@ class SubscriptionController {
     }
   }
 
-  async upgradePlan(req, res) {
+  async createSubscription(req, res) {
     try {
-      const { planId, billingCycle } = req.body;
+      const { doctorCount, billingCycle } = req.body;
 
-      if (!planId || !billingCycle) {
+      if (!doctorCount || !billingCycle) {
         return res.status(400).json({ 
           error: 'Validation failed',
-          message: 'Plan ID and billing cycle are required'
+          message: 'Doctor count and billing cycle are required'
         });
       }
 
-      const newSubscription = await subscriptionService.upgradePlan(
+      const subscription = await subscriptionService.createSubscription(
         req.user.hospital_id,
-        planId,
+        doctorCount,
+        billingCycle
+      );
+
+      return res.status(201).json({
+        message: 'Subscription created successfully',
+        subscription
+      });
+    } catch (error) {
+      console.error('Error creating subscription:', error);
+
+      if (error.message.includes('Doctor count must be between')) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      return res.status(500).json({ error: 'Failed to create subscription' });
+    }
+  }
+
+  async updateDoctorCount(req, res) {
+    try {
+      const { doctorCount,billingCycle } = req.body;
+
+      if (!doctorCount) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Doctor count is required'
+        });
+      }
+
+      const subscription = await subscriptionService.updateDoctorCount(
+        req.user.hospital_id,
+        doctorCount,
         billingCycle
       );
 
       return res.json({
-        message: 'Plan upgraded successfully',
-        subscription: newSubscription
+        message: 'Doctor count updated successfully',
+        subscription
       });
     } catch (error) {
-      console.error('Error upgrading subscription plan:', error);
+      console.error('Error updating doctor count:', error);
 
-      if (error.validationErrors) {
-        return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
-        });
-      }
-
-      if (error.message === 'No active subscription found' || 
-          error.message === 'New plan not found') {
-        return res.status(404).json({ error: error.message });
-      }
-
-      if (error.message === 'Selected plan is not active') {
+      if (error.message.includes('Doctor count must be between') || 
+          error.message === 'No active subscription found') {
         return res.status(400).json({ error: error.message });
       }
 
-      return res.status(500).json({ error: 'Failed to upgrade subscription plan' });
+      return res.status(500).json({ error: 'Failed to update doctor count' });
     }
   }
 
@@ -204,44 +111,23 @@ class SubscriptionController {
         });
       }
 
-      const renewedSubscription = await subscriptionService.renewSubscription(
+      const subscription = await subscriptionService.renewSubscription(
         req.user.hospital_id,
         billingCycle
       );
 
       return res.json({
         message: 'Subscription renewed successfully',
-        subscription: renewedSubscription
+        subscription
       });
     } catch (error) {
       console.error('Error renewing subscription:', error);
-
-      if (error.validationErrors) {
-        return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
-        });
-      }
 
       if (error.message === 'No active subscription found') {
         return res.status(404).json({ error: error.message });
       }
 
-      if (error.message === 'Current plan is no longer active. Please upgrade to a different plan.') {
-        return res.status(400).json({ error: error.message });
-      }
-
       return res.status(500).json({ error: 'Failed to renew subscription' });
-    }
-  }
-
-  async refreshCache(req, res) {
-    try {
-      await subscriptionService.invalidateAndRefreshCache();
-      return res.json({ message: 'Cache refreshed successfully' });
-    } catch (error) {
-      console.error('Error refreshing cache:', error);
-      return res.status(500).json({ error: 'Failed to refresh cache' });
     }
   }
 }

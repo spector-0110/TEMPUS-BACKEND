@@ -1,6 +1,7 @@
 const { 
   SUBSCRIPTION_STATUS, 
   BILLING_CYCLE,
+  LIMITS,
   MIN_SUBSCRIPTION_PRICE,
   MAX_DOCTORS_PER_PLAN,
   FEATURE_LIMITS
@@ -77,7 +78,7 @@ class SubscriptionValidator {
   validateSubscriptionData(data) {
     const schema = Joi.object({
       hospitalId: Joi.string().uuid().required(),
-      planId: Joi.string().uuid().required(),
+      doctorCount: Joi.number().integer().min(LIMITS.MIN_DOCTORS).max(LIMITS.MAX_DOCTORS).required(),
       billingCycle: Joi.string().valid(...Object.values(BILLING_CYCLE)).required(),
       startDate: Joi.date().iso().required(),
       endDate: Joi.date().iso().greater(Joi.ref('startDate')).required(),
@@ -110,6 +111,48 @@ class SubscriptionValidator {
       smsUsed: Joi.number().integer().min(0),
       emailsUsed: Joi.number().integer().min(0)
     }).min(3); // Must include at least hospitalId, subscriptionId, and one usage metric
+
+    const validation = schema.validate(data, { abortEarly: false });
+
+    if (validation.error) {
+      return {
+        isValid: false,
+        errors: validation.error.details.map(err => err.message)
+      };
+    }
+
+    return {
+      isValid: true,
+      data: validation.value
+    };
+  }
+
+  validateDoctorCountUpdate(data) {
+    const schema = Joi.object({
+      hospitalId: Joi.string().uuid().required(),
+      doctorCount: Joi.number().integer().min(LIMITS.MIN_DOCTORS).max(LIMITS.MAX_DOCTORS).required()
+    });
+
+    const validation = schema.validate(data, { abortEarly: false });
+
+    if (validation.error) {
+      return {
+        isValid: false,
+        errors: validation.error.details.map(err => err.message)
+      };
+    }
+
+    return {
+      isValid: true,
+      data: validation.value
+    };
+  }
+
+  validateBillingCycleUpdate(data) {
+    const schema = Joi.object({
+      hospitalId: Joi.string().uuid().required(),
+      billingCycle: Joi.string().valid(...Object.values(BILLING_CYCLE)).required()
+    });
 
     const validation = schema.validate(data, { abortEarly: false });
 
