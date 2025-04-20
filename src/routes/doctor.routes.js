@@ -11,6 +11,6 @@ router.post('/', doctorController.createDoctor);
 router.get('/', doctorController.listDoctors);
 router.get('/:id', doctorController.getDoctorDetails);
 router.put('/:id', doctorController.updateDoctorDetails);
-router.put('/:id/schedule/:dayOfWeek', doctorController.updateDoctorSchedule);
+router.put('/:id/:dayOfWeek', doctorController.updateDoctorSchedule);
 
 module.exports = router;

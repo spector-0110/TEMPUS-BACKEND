@@ -190,6 +190,13 @@ class SubscriptionService {
   }
 
   async upgradePlan(hospitalId, newPlanId, billingCycle) {
+    // Validate billing cycle
+    if (!Object.values(BILLING_CYCLE).includes(billingCycle)) {
+      throw Object.assign(new Error('Validation failed'), { 
+        validationErrors: ['Invalid billing cycle'] 
+      });
+    }
+
     const [currentSub, newPlan] = await Promise.all([
       this.getHospitalSubscription(hospitalId),
       prisma.subscriptionPlan.findUnique({ where: { id: newPlanId } })
@@ -200,6 +207,9 @@ class SubscriptionService {
     }
     if (!newPlan) {
       throw new Error('New plan not found');
+    }
+    if (!newPlan.isActive) {
+      throw new Error('Selected plan is not active');
     }
 
     const startDate = new Date();
@@ -221,10 +231,22 @@ class SubscriptionService {
       existingSubscriptionId: currentSub.id
     });
   }
-async renewSubscription(hospitalId, billingCycle) {
+
+  async renewSubscription(hospitalId, billingCycle) {
+    // Validate billing cycle
+    if (!Object.values(BILLING_CYCLE).includes(billingCycle)) {
+      throw Object.assign(new Error('Validation failed'), { 
+        validationErrors: ['Invalid billing cycle'] 
+      });
+    }
+
     const currentSub = await this.getHospitalSubscription(hospitalId);
     if (!currentSub) {
       throw new Error('No active subscription found');
+    }
+
+    if (!currentSub.plan.isActive) {
+      throw new Error('Current plan is no longer active. Please upgrade to a different plan.');
     }
 
     const startDate = new Date();
@@ -246,8 +268,9 @@ async renewSubscription(hospitalId, billingCycle) {
       existingSubscriptionId: currentSub.id
     });
   }
-// Subscription History
-async getSubscriptionHistory(hospitalId) {
+
+  // Subscription History
+  async getSubscriptionHistory(hospitalId) {
     return await prisma.subscriptionHistory.findMany({
       where: { hospitalId },
       include: { plan: true },

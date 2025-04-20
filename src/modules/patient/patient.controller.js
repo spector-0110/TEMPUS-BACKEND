@@ -12,6 +12,13 @@ class PatientController {
 
   async createPatient(req, res) {
     try {
+      if (!req.body || !Object.keys(req.body).length) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Patient data is required'
+        });
+      }
+
       const patient = await patientService.createPatient(
         req.user.hospital_id,
         req.body
@@ -24,6 +31,10 @@ class PatientController {
     } catch (error) {
       console.error('Error creating patient:', error);
       
+      if (error.message === 'A patient with this email or phone number already exists in this hospital') {
+        return res.status(409).json({ error: error.message });
+      }
+
       if (error.validationErrors) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -56,6 +67,13 @@ class PatientController {
 
   async updatePatientDetails(req, res) {
     try {
+      if (!req.body || !Object.keys(req.body).length) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Update data is required'
+        });
+      }
+
       const updatedPatient = await patientService.updatePatientDetails(
         req.user.hospital_id,
         req.params.id,
@@ -73,6 +91,10 @@ class PatientController {
         return res.status(404).json({ error: error.message });
       }
 
+      if (error.message === 'Another patient with this email or phone number already exists in this hospital') {
+        return res.status(409).json({ error: error.message });
+      }
+
       if (error.validationErrors) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -86,16 +108,12 @@ class PatientController {
 
   async searchPatients(req, res) {
     try {
-      const filters = req.query;
-      const pagination = {
-        page: parseInt(req.query.page, 10) || 1,
-        limit: parseInt(req.query.limit, 10) || 10
-      };
+      const { filters = {}, page = 1, limit = 10 } = req.query;
 
       const result = await patientService.searchPatients(
         req.user.hospital_id,
         filters,
-        pagination
+        { page: parseInt(page), limit: parseInt(limit) }
       );
 
       return res.json(result);

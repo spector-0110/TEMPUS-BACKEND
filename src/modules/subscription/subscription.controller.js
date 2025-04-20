@@ -31,8 +31,18 @@ class SubscriptionController {
 
   async createPlan(req, res) {
     try {
+      if (!req.body || !Object.keys(req.body).length) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Plan data is required'
+        });
+      }
+
       const newPlan = await subscriptionService.createPlan(req.body);
-      return res.status(201).json(newPlan);
+      return res.status(201).json({
+        message: 'Subscription plan created successfully',
+        plan: newPlan
+      });
     } catch (error) {
       console.error('Error creating subscription plan:', error);
 
@@ -43,18 +53,34 @@ class SubscriptionController {
         });
       }
 
+      if (error.code === 'P2002') {
+        return res.status(409).json({ 
+          error: 'Plan with this name already exists' 
+        });
+      }
+
       return res.status(500).json({ error: 'Failed to create subscription plan' });
     }
   }
 
   async updatePlan(req, res) {
     try {
+      if (!req.body || !Object.keys(req.body).length) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Update data is required'
+        });
+      }
+
       const updatedPlan = await subscriptionService.updatePlan(
         req.params.id,
         req.body
       );
 
-      return res.json(updatedPlan);
+      return res.json({
+        message: 'Subscription plan updated successfully',
+        plan: updatedPlan
+      });
     } catch (error) {
       console.error('Error updating subscription plan:', error);
 
@@ -67,6 +93,12 @@ class SubscriptionController {
 
       if (error.code === 'P2025') {
         return res.status(404).json({ error: 'Subscription plan not found' });
+      }
+
+      if (error.code === 'P2002') {
+        return res.status(409).json({ 
+          error: 'Plan with this name already exists' 
+        });
       }
 
       return res.status(500).json({ error: 'Failed to update subscription plan' });
@@ -141,9 +173,20 @@ class SubscriptionController {
     } catch (error) {
       console.error('Error upgrading subscription plan:', error);
 
+      if (error.validationErrors) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: error.validationErrors
+        });
+      }
+
       if (error.message === 'No active subscription found' || 
           error.message === 'New plan not found') {
         return res.status(404).json({ error: error.message });
+      }
+
+      if (error.message === 'Selected plan is not active') {
+        return res.status(400).json({ error: error.message });
       }
 
       return res.status(500).json({ error: 'Failed to upgrade subscription plan' });
@@ -173,8 +216,19 @@ class SubscriptionController {
     } catch (error) {
       console.error('Error renewing subscription:', error);
 
+      if (error.validationErrors) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          validationErrors: error.validationErrors
+        });
+      }
+
       if (error.message === 'No active subscription found') {
         return res.status(404).json({ error: error.message });
+      }
+
+      if (error.message === 'Current plan is no longer active. Please upgrade to a different plan.') {
+        return res.status(400).json({ error: error.message });
       }
 
       return res.status(500).json({ error: 'Failed to renew subscription' });

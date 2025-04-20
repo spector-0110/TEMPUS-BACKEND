@@ -12,6 +12,13 @@ class DoctorController {
 
   async createDoctor(req, res) {
     try {
+      if (!req.body || !Object.keys(req.body).length) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          message: 'Doctor data is required'
+        });
+      }
+
       const doctor = await doctorService.createDoctor(
         req.user.hospital_id,
         req.body
@@ -25,11 +32,28 @@ class DoctorController {
       console.error('Error creating doctor:', error);
 
       if (error.message === 'No active subscription found') {
-        return res.status(402).json({ error: error.message });
+        return res.status(402).json({ 
+          error: error.message,
+          message: 'Please activate a subscription to add doctors' 
+        });
+      }
+
+      if (error.message === 'Invalid subscription plan features') {
+        return res.status(400).json({ 
+          error: error.message,
+          message: 'Your subscription plan is misconfigured. Please contact support.' 
+        });
       }
 
       if (error.message === 'Doctor limit reached for current subscription plan') {
-        return res.status(403).json({ error: error.message });
+        return res.status(403).json({ 
+          error: error.message,
+          message: 'Please upgrade your subscription plan to add more doctors' 
+        });
+      }
+
+      if (error.message === 'A doctor with this email or phone number or aadhar already exists in this hospital') {
+        return res.status(409).json({ error: error.message });
       }
 
       if (error.validationErrors) {
@@ -62,6 +86,10 @@ class DoctorController {
         return res.status(404).json({ error: error.message });
       }
 
+      if (error.message === 'A doctor with this email or phone number or aadhar already exists in this hospital') {
+        return res.status(409).json({ error: error.message });
+      }
+
       if (error.validationErrors) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -89,7 +117,7 @@ class DoctorController {
     } catch (error) {
       console.error('Error updating doctor schedule:', error);
 
-      if (error.message === 'Doctor not found') {
+      if (error.message === 'Doctor not found' || error.message === 'Doctor not found or inactive') {
         return res.status(404).json({ error: error.message });
       }
 

@@ -5,10 +5,25 @@ const { CACHE_KEYS, CACHE_EXPIRY } = require('./patient.constants');
 
 class PatientService {
   async createPatient(hospitalId, patientData) {
+    // Validate patient data first
     const validationResult = patientValidator.validateCreatePatientData(patientData);
-    
     if (!validationResult.isValid) {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
+    }
+
+    // Check if patient with same email or phone exists
+    const existingPatient = await prisma.patient.findFirst({
+      where: {
+        hospitalId,
+        OR: [
+          patientData.contact.email ? { 'contact.email': patientData.contact.email } : {},
+          { 'contact.phone': patientData.contact.phone }
+        ]
+      }
+    });
+
+    if (existingPatient) {
+      throw new Error('A patient with this email or phone number already exists in this hospital');
     }
 
     // Format address if provided
@@ -79,6 +94,24 @@ class PatientService {
     const validationResult = patientValidator.validateCreatePatientData(updateData);
     if (!validationResult.isValid) {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
+    }
+
+    // Check for duplicate contact info if being updated
+    if (updateData.contact) {
+      const duplicatePatient = await prisma.patient.findFirst({
+        where: {
+          hospitalId,
+          id: { not: patientId },
+          OR: [
+            updateData.contact.email ? { 'contact.email': updateData.contact.email } : {},
+            { 'contact.phone': updateData.contact.phone }
+          ]
+        }
+      });
+
+      if (duplicatePatient) {
+        throw new Error('Another patient with this email or phone number already exists in this hospital');
+      }
     }
 
     // Format address if provided

@@ -99,6 +99,10 @@ class HospitalController {
     } catch (error) {
       console.error('Error updating hospital details:', error);
       
+      if (error.message === 'Hospital not found') {
+        return res.status(404).json({ error: error.message });
+      }
+      
       if (error.message === 'OTP verification required for editing') {
         return res.status(403).json({ error: error.message });
       }
