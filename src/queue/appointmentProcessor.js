@@ -1,6 +1,6 @@
 const RabbitMQService = require('../services/rabbitmq.service');
 const redisService = require('../services/redis.service');
-const mailService = require('../services/mail.service');
+const messageService = require('../modules/notification/message.service');
 
 class AppointmentProcessor {
   constructor() {
@@ -26,11 +26,8 @@ class AppointmentProcessor {
         // Group appointments by date for notifications
         const appointmentsByDate = this.groupAppointmentsByDate(appointments);
         
-        // Send consolidated email to doctor
-        await this.sendDoctorNotification(doctor, appointmentsByDate, reason);
-        
-        // Send consolidated email to admin
-        await this.sendAdminNotification(doctor, appointmentsByDate, reason);
+        // Send consolidated notifications through message service
+        await this.sendNotifications(doctor, appointmentsByDate, reason);
 
         // Log success
         await redisService.setCache(`appointment:update:${Date.now()}`, {
@@ -40,7 +37,7 @@ class AppointmentProcessor {
         }, 7 * 24 * 60 * 60);
       } catch (error) {
         console.error('Error processing appointment update:', error);
-        throw error; // Trigger retry mechanism
+        throw error;
       }
     }, {
       maxRetries: 3,
@@ -49,17 +46,53 @@ class AppointmentProcessor {
   }
 
   groupAppointmentsByDate(appointments) {
-    return appointments.reduce((acc, appointment) => {
-      const date = new Date(appointment.scheduledTime).toLocaleDateString();
+    return appointments.reduce((acc, apt) => {
+      const date = new Date(apt.scheduledTime).toLocaleDateString();
       if (!acc[date]) {
         acc[date] = [];
       }
-      acc[date].push(appointment);
+      acc[date].push(apt);
       return acc;
     }, {});
   }
 
-  async sendDoctorNotification(doctor, appointmentsByDate, reason) {
+  async sendNotifications(doctor, appointmentsByDate, reason) {
+    const doctorEmailContent = this.generateDoctorEmailContent(doctor, appointmentsByDate, reason);
+    const adminEmailContent = this.generateAdminEmailContent(doctor, appointmentsByDate, reason);
+
+    // Send doctor notification
+    await messageService.sendMessage('email', {
+      to: doctor.email,
+      subject: 'Schedule Change - Action Required',
+      content: doctorEmailContent,
+      hospitalId: doctor.hospitalId
+    });
+
+    // Send admin notification if admin email exists
+    if (doctor.hospitalAdminEmail) {
+      await messageService.sendMessage('email', {
+        to: doctor.hospitalAdminEmail,
+        subject: 'Doctor Schedule Change - Action Required',
+        content: adminEmailContent,
+        hospitalId: doctor.hospitalId
+      });
+    }
+
+    // Send SMS notifications to affected patients
+    for (const [date, appointments] of Object.entries(appointmentsByDate)) {
+      for (const apt of appointments) {
+        if (apt.patientPhone) {
+          await messageService.sendMessage('sms', {
+            to: apt.patientPhone,
+            content: `Your appointment with Dr. ${doctor.name} on ${date} at ${new Date(apt.scheduledTime).toLocaleTimeString()} has been affected due to ${reason}. The hospital will contact you for rescheduling.`,
+            hospitalId: doctor.hospitalId
+          });
+        }
+      }
+    }
+  }
+
+  generateDoctorEmailContent(doctor, appointmentsByDate, reason) {
     let appointmentsList = '';
     Object.entries(appointmentsByDate).forEach(([date, appointments]) => {
       appointmentsList += `
@@ -76,7 +109,7 @@ class AppointmentProcessor {
       `;
     });
 
-    const emailContent = `
+    return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #2563EB;">Schedule Change Notification</h2>
         <p>Dear Dr. ${doctor.name},</p>
@@ -94,23 +127,18 @@ class AppointmentProcessor {
         </p>
       </div>
     `;
-
-    await mailService.sendMail(doctor.email, 'Schedule Change - Action Required', emailContent);
   }
 
-  async sendAdminNotification(doctor, appointmentsByDate, reason) {
+  generateAdminEmailContent(doctor, appointmentsByDate, reason) {
     let appointmentsList = '';
-    let totalPatients = 0;
-
     Object.entries(appointmentsByDate).forEach(([date, appointments]) => {
-      totalPatients += appointments.length;
       appointmentsList += `
         <div style="margin-bottom: 20px;">
           <h3 style="color: #4B5563;">${date}</h3>
           ${appointments.map(apt => `
-            <div style="margin-left: 20px; border-left: 3px solid #e2e8f0; padding-left: 10px; margin-bottom: 10px;">
+            <div style="margin-left: 20px;">
               <p><strong>Patient:</strong> ${apt.patientName}</p>
-              <p><strong>Contact:</strong> ${apt.patientPhone}</p>
+              <p><strong>Contact:</strong> ${apt.patientPhone || 'N/A'}</p>
               <p><strong>Time:</strong> ${new Date(apt.scheduledTime).toLocaleTimeString()}</p>
               <p><strong>Duration:</strong> ${apt.duration} minutes</p>
             </div>
@@ -119,18 +147,17 @@ class AppointmentProcessor {
       `;
     });
 
-    const emailContent = `
+    return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #dc2626;">Doctor Schedule Change - Action Required</h2>
-        <p>Dr. ${doctor.name}'s schedule has been affected due to ${reason}.</p>
-        <p><strong>Total Affected Patients:</strong> ${totalPatients}</p>
+        <h2 style="color: #2563EB;">Doctor Schedule Change - Action Required</h2>
+        <p>Schedule changes have been made for Dr. ${doctor.name} due to ${reason}.</p>
+        <p>The following appointments need to be rescheduled:</p>
         
         <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          <h3>Affected Appointments:</h3>
           ${appointmentsList}
         </div>
 
-        <p>Please contact the affected patients to arrange new appointments.</p>
+        <p>Please contact the affected patients to reschedule their appointments.</p>
         
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
         <p style="color: #64748b; font-size: 12px;">
@@ -138,8 +165,6 @@ class AppointmentProcessor {
         </p>
       </div>
     `;
-
-    await mailService.sendMail(doctor.hospitalAdminEmail, 'Doctor Schedule Change - Action Required', emailContent);
   }
 }
 

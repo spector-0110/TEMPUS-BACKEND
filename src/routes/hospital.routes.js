@@ -13,7 +13,7 @@ router.post('/form-config/reset', superAdminMiddleware, hospitalController.reset
 
 // Initial registration route - needs auth but not hospital_id
 router.post('/initial-details', authMiddleware, hospitalController.createHospital);
-
+    
 // Protected routes - need both auth and hospital_id
 router.use(authMiddleware);
 

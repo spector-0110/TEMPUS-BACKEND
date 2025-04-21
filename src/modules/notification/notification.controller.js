@@ -1,5 +1,6 @@
 const redisService = require('../../services/redis.service');
 const rabbitmqService = require('../../services/rabbitmq.service');
+const messageService = require('./message.service');
 const {
   ValidationError,
   NotificationQueueError,
@@ -11,14 +12,17 @@ class NotificationController {
   constructor() {
     this.initializeQueues();
   }
-
   async initializeQueues() {
     try {
-      // Create notification queues
+      // Create notification queues with dead letter exchanges
       await Promise.all([
-        rabbitmqService.createQueue('email_notifications'),
-        rabbitmqService.createQueue('sms_notifications'),
-        rabbitmqService.createDelayedQueue('appointment_reminders', 24 * 60 * 60 * 1000)
+        rabbitmqService.createQueue('notifications', {
+          deadLetterExchange: true,
+          maxLength: 500000
+        }),
+        rabbitmqService.createQueue('notifications_dlq', {
+          messageTtl: 7 * 24 * 60 * 60 * 1000 // 7 days retention for dead letters
+        })
       ]);
     } catch (error) {
       console.error('Failed to initialize notification queues:', error);
@@ -29,7 +33,7 @@ class NotificationController {
       );
     }
   }
-
+  
   async scheduleAppointmentReminder(appointmentData) {
     try {
       if (!appointmentData?.id || !appointmentData.appointmentDate) {
@@ -125,48 +129,50 @@ class NotificationController {
         ]);
       }
 
-      if (!['email', 'sms'].includes(type.toLowerCase())) {
+      const supportedTypes = ['email', 'sms', 'whatsapp', 'otp'];
+      if (!supportedTypes.includes(type.toLowerCase())) {
         throw new ValidationError('Invalid notification type', [
-          'Type must be either "email" or "sms"'
+          `Type must be one of: ${supportedTypes.join(', ')}`
         ]);
       }
 
-      const queueName = type === 'email' ? 'email_notifications' : 'sms_notifications';
-      
       try {
-        await rabbitmqService.publishToQueue(queueName, {
-          type: type.toUpperCase(),
-          timestamp: new Date(),
-          data
-        });
+        return await messageService.sendMessage(type.toLowerCase(), data);
       } catch (error) {
         throw new NotificationQueueError(
           'Failed to queue notification',
-          queueName,
+          'notifications',
           error
         );
       }
-
-      // Store notification in Redis for tracking
-      const notificationKey = `notification:${type}:${Date.now()}`;
-      try {
-        await redisService.setCache(notificationKey, {
-          status: 'sent',
-          timestamp: new Date(),
-          data
-        }, 7 * 24 * 60 * 60); // 7 days retention
-      } catch (error) {
-        throw new NotificationCacheError(
-          'Failed to track notification status',
-          'set',
-          error
-        );
-      }
-
-      return true;
     } catch (error) {
       console.error('Error sending notification:', error);
-      throw error; // Re-throw our custom errors
+      throw error;
+    }
+  }
+
+  async getNotificationStatus(messageId) {
+    try {
+      const status = await redisService.getCache(`message:${messageId}`);
+      if (!status) {
+        throw new NotificationCacheError(
+          'Notification status not found',
+          'get'
+        );
+      }
+      return status;
+    } catch (error) {
+      console.error('Error getting notification status:', error);
+      throw error;
+    }
+  }
+
+  async getNotificationStats(hospitalId, startDate, endDate) {
+    try {
+      return await messageService.getMessageStats(hospitalId, startDate, endDate);
+    } catch (error) {
+      console.error('Error getting notification stats:', error);
+      throw error;
     }
   }
 }

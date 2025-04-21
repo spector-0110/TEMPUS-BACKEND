@@ -49,24 +49,6 @@ enum DoctorStatus {
   inactive
 }
 
-enum MessageStatus {
-  PENDING
-  SENT
-  FAILED
-}
-
-enum MessageType {
-  SMS
-  EMAIL
-}
-
-enum MessageTemplateType {
-  OTP
-  APPOINTMENT_REMINDER
-  SUBSCRIPTION_NOTIFICATION
-  GENERAL_NOTIFICATION
-}
-
 model Hospital {
   id                  String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   supabaseUserId      String?                @unique @map("supabase_user_id") @db.Uuid
@@ -79,15 +61,15 @@ model Hospital {
   logo                String?
   themeColor          String?                @map("theme_color")
   createdAt           DateTime               @default(now()) @map("created_at")
-  // Relations
+  
+  //Relation::
   doctors             Doctor[]
   appointments        Appointment[]
   subscriptions       HospitalSubscription[]
   subscriptionHistory SubscriptionHistory[]
   doctorSchedules     DoctorSchedule[]
-  messageLogs         MessageLog[]
-  messageQuotas       MessageQuota[]
-
+  usageStats          UsageStats[]  
+  
   @@map("hospitals")
 }
 
@@ -122,7 +104,6 @@ model SubscriptionHistory {
   hospitalId     String             @map("hospital_id") @db.Uuid
   doctorCount    Int                @map("doctor_count")
   billingCycle   BillingCycle       @map("billing_cycle")
-  pricePerDoctor Decimal            @map("price_per_doctor")
   totalPrice     Decimal            @map("total_price")
   startDate      DateTime           @map("start_date")
   endDate        DateTime           @map("end_date")

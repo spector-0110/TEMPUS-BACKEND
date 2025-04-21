@@ -1,5 +1,5 @@
-const redisService = require('./redis.service');
 const crypto = require('crypto');
+const { redisClient } = require('./redis.service');
 
 class OTPService {
   constructor() {
@@ -66,9 +66,9 @@ class OTPService {
     return !!status;
   }
 
-  async invalidateEditVerificationStatus(hospitalId) {
-    const key = `edit_verified:hospital:${hospitalId}`;
-    await redisService.invalidateCache(key);
+  async invalidateEditVerificationStatus(entityId) {
+    const key = `edit_verified:${entityId}`;
+    await redisClient.del(key);
   }
 }
 

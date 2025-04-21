@@ -1,4 +1,5 @@
 const subscriptionService = require('./subscription.service');
+const { SUBSCRIPTION_STATUS } = require('./subscription.constants');
 
 class SubscriptionController {
   constructor() {
@@ -8,6 +9,8 @@ class SubscriptionController {
     this.createSubscription = this.createSubscription.bind(this);
     this.updateDoctorCount = this.updateDoctorCount.bind(this);
     this.renewSubscription = this.renewSubscription.bind(this);
+    this.cancelSubscription = this.cancelSubscription.bind(this);
+    this.getCurrentSubscription = this.getCurrentSubscription.bind(this);
   }
 
   async getHospitalSubscription(req, res) {
@@ -27,107 +30,127 @@ class SubscriptionController {
 
   async getSubscriptionHistory(req, res) {
     try {
-      const history = await subscriptionService.getSubscriptionHistory(req.user.hospital_id);
-      return res.json(history);
+      const { hospitalId } = req.params;
+      const history = await subscriptionService.getSubscriptionHistory(hospitalId);
+
+      return res.status(200).json({
+        success: true,
+        data: history
+      });
     } catch (error) {
-      console.error('Error fetching subscription history:', error);
-      return res.status(500).json({ error: 'Failed to fetch subscription history' });
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 
   async createSubscription(req, res) {
     try {
-      const { doctorCount, billingCycle } = req.body;
-
-      if (!doctorCount || !billingCycle) {
-        return res.status(400).json({ 
-          error: 'Validation failed',
-          message: 'Doctor count and billing cycle are required'
-        });
-      }
-
+      const { hospitalId, doctorCount, billingCycle, paymentMethod, paymentDetails } = req.body;
       const subscription = await subscriptionService.createSubscription(
-        req.user.hospital_id,
+        hospitalId,
         doctorCount,
-        billingCycle
+        billingCycle,
+        paymentMethod,
+        paymentDetails
       );
-
+      
       return res.status(201).json({
-        message: 'Subscription created successfully',
-        subscription
+        success: true,
+        data: subscription
       });
     } catch (error) {
-      console.error('Error creating subscription:', error);
-
-      if (error.message.includes('Doctor count must be between')) {
-        return res.status(400).json({ error: error.message });
-      }
-
-      return res.status(500).json({ error: 'Failed to create subscription' });
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 
   async updateDoctorCount(req, res) {
     try {
-      const { doctorCount,billingCycle } = req.body;
-
-      if (!doctorCount || !billingCycle) {
-        return res.status(400).json({ 
-          error: 'Validation failed',
-          message: 'Doctor count and billing cycle are required'
-        });
-      }
-
+      const { hospitalId, newDoctorCount, billingCycle, paymentMethod, paymentDetails } = req.body;
       const subscription = await subscriptionService.updateDoctorCount(
-        req.user.hospital_id,
-        doctorCount,
-        billingCycle
+        hospitalId,
+        newDoctorCount,
+        billingCycle,
+        paymentMethod,
+        paymentDetails
       );
 
-      return res.json({
-        message: 'Doctor count updated successfully',
-        subscription
+      return res.status(200).json({
+        success: true,
+        data: subscription
       });
     } catch (error) {
-      console.error('Error updating doctor count:', error);
-
-      if (error.message.includes('Doctor count must be between') || 
-          error.message === 'No active subscription found') {
-        return res.status(400).json({ error: error.message });
-      }
-
-      return res.status(500).json({ error: 'Failed to update doctor count' });
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 
   async renewSubscription(req, res) {
     try {
-      const { billingCycle } = req.body;
+      const { hospitalId, billingCycle, paymentMethod, paymentDetails } = req.body;
+      const subscription = await subscriptionService.renewSubscription(
+        hospitalId,
+        billingCycle,
+        paymentMethod,
+        paymentDetails
+      );
 
-      if (!billingCycle) {
-        return res.status(400).json({ 
-          error: 'Validation failed',
-          message: 'Billing cycle is required'
+      return res.status(200).json({
+        success: true,
+        data: subscription
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  async cancelSubscription(req, res) {
+    try {
+      const { hospitalId } = req.body;
+      const subscription = await subscriptionService.cancelSubscription(hospitalId);
+
+      return res.status(200).json({
+        success: true,
+        data: subscription
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  async getCurrentSubscription(req, res) {
+    try {
+      const { hospitalId } = req.params;
+      const subscription = await subscriptionService.getHospitalSubscription(hospitalId);
+
+      if (!subscription) {
+        return res.status(404).json({
+          success: false,
+          error: 'No active subscription found'
         });
       }
 
-      const subscription = await subscriptionService.renewSubscription(
-        req.user.hospital_id,
-        billingCycle
-      );
-
-      return res.json({
-        message: 'Subscription renewed successfully',
-        subscription
+      return res.status(200).json({
+        success: true,
+        data: subscription
       });
     } catch (error) {
-      console.error('Error renewing subscription:', error);
-
-      if (error.message === 'No active subscription found') {
-        return res.status(404).json({ error: error.message });
-      }
-
-      return res.status(500).json({ error: 'Failed to renew subscription' });
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 }

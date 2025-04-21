@@ -2,15 +2,32 @@ const express = require('express');
 const router = express.Router();
 const subscriptionController = require('../modules/subscription/subscription.controller');
 const authMiddleware = require('../middleware/auth.middleware');
+const { 
+  validateCreateSubscription,
+  validateUpdateDoctorCount,
+  validateRenewSubscription,
+  validateCancelSubscription
+} = require('../middleware/subscription.validator.middleware');
 
-// All routes require authentication
+// All subscription routes require authentication
 router.use(authMiddleware);
 
-// Hospital subscription management
-router.get('/current', subscriptionController.getHospitalSubscription);
-router.get('/history', subscriptionController.getSubscriptionHistory);
-router.post('/create', subscriptionController.createSubscription);
-router.put('/update-doctors', subscriptionController.updateDoctorCount);
-router.post('/renew', subscriptionController.renewSubscription);
+// Get current subscription
+router.get('/current/:hospitalId', subscriptionController.getCurrentSubscription);
+
+// Get subscription history
+router.get('/history/:hospitalId', subscriptionController.getSubscriptionHistory);
+
+// Create new subscription with validation
+router.post('/create', validateCreateSubscription, subscriptionController.createSubscription);
+
+// Update doctor count with validation
+router.put('/update-doctors', validateUpdateDoctorCount, subscriptionController.updateDoctorCount);
+
+// Renew subscription with validation
+router.post('/renew', validateRenewSubscription, subscriptionController.renewSubscription);
+
+// Cancel subscription with validation
+router.post('/cancel', validateCancelSubscription, subscriptionController.cancelSubscription);
 
 module.exports = router;

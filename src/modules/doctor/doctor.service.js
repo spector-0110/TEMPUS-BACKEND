@@ -1,7 +1,6 @@
 const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
-const mailService = require('../../services/mail.service');
-const rabbitmqService = require('../../services/rabbitmq.service');
+const messageService = require('../notification/message.service');
 const doctorValidator = require('./doctor.validator');
 const subscriptionService = require('../subscription/subscription.service');
 const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS, DOCTOR_STATUS } = require('./doctor.constants');
@@ -69,12 +68,12 @@ class DoctorService {
     });
 
     // Send welcome email to doctor
-    await mailService.sendMail(
-      doctor.email,
-      'Welcome to Tempus - Doctor Onboarding',
-      this.getWelcomeEmailTemplate(doctor),
+    await messageService.sendMessage('email', {
+      to: doctor.email,
+      subject: 'Welcome to Tempus - Doctor Onboarding',
+      content: this.getWelcomeEmailTemplate(doctor),
       hospitalId
-    );
+    });
 
     // Invalidate hospital's doctor list cache
     await redisService.invalidateCache(CACHE_KEYS.DOCTOR_LIST + hospitalId);
@@ -136,12 +135,12 @@ class DoctorService {
     ]);
 
     // Send details change notification
-    await mailService.sendMail(
-        updatedDoctor.email,
-        'Doctor Detail Update',
-        this.getUpdateEmailTemplate(updatedDoctor),
-        hospitalId
-      );
+    await messageService.sendMessage('email', {
+      to: updatedDoctor.email,
+      subject: 'Doctor Detail Update',
+      content: this.getUpdateEmailTemplate(updatedDoctor),
+      hospitalId
+    });
 
     return updatedDoctor;
   }
@@ -211,21 +210,21 @@ class DoctorService {
     const dayName = days[dayOfWeek];
 
     // Notify doctor about schedule update
-    await mailService.sendMail(
-      doctor.email,
-      'Schedule Update Notification',
-      this.getScheduleUpdateEmailTemplate(doctor, updatedSchedule, dayName),
+    await messageService.sendMessage('email', {
+      to: doctor.email,
+      subject: 'Schedule Update Notification',
+      content: this.getScheduleUpdateEmailTemplate(doctor, updatedSchedule, dayName),
       hospitalId
-    );
+    });
 
     // Notify hospital admin
     if (doctor.hospital?.adminEmail) {
-      await mailService.sendMail(
-        doctor.hospital.adminEmail,
-        `Doctor Schedule Update - ${doctor.name}`,
-        this.getAdminScheduleUpdateEmailTemplate(doctor, updatedSchedule, dayName),
+      await messageService.sendMessage('email', {
+        to: doctor.hospital.adminEmail,
+        subject: `Doctor Schedule Update - ${doctor.name}`,
+        content: this.getAdminScheduleUpdateEmailTemplate(doctor, updatedSchedule, dayName),
         hospitalId
-      );
+      });
     }
 
     // Invalidate relevant caches
