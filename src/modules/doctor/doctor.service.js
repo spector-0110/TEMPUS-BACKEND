@@ -15,15 +15,9 @@ class DoctorService {
       throw new Error('No active subscription found');
     }
 
-    // Get the current features from the subscription
-    const features = subscription.planFeatures;
-    if (!features?.max_doctors) {
-      throw new Error('Invalid subscription plan features');
-    }
-
     const currentDoctorCount = await prisma.doctor.count({ where: { hospitalId } });
-    if (currentDoctorCount >= features.max_doctors) {
-      throw new Error('Doctor limit reached for current subscription plan');
+    if (currentDoctorCount >= subscription.doctorCount) {
+      throw new Error('Doctor limit reached for current subscription');
     }
 
     // Check if doctor with same email or phone exists in the hospital

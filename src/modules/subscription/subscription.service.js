@@ -9,7 +9,6 @@ const {
   LIMITS
 } = require('./subscription.constants');
 
-const subscriptionValidator = require('./subscription.validator');
 const messageService = require('../notification/message.service');
 
 class SubscriptionService {

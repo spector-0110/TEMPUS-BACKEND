@@ -96,7 +96,6 @@ class SubscriptionCronService {
 
   async sendWarningEmail(subscription) {
     const daysToExpiry = Math.ceil((subscription.endDate - new Date()) / (1000 * 60 * 60 * 24));
-    const totalPrice = subscription.pricePerDoctor * subscription.doctorCount;
     
     const emailContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -106,9 +105,8 @@ class SubscriptionCronService {
         <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
           <p><strong>Subscription Details:</strong></p>
           <ul>
-            <li>Active Doctors: ${subscription.doctorCount}</li>
-            <li>Price per Doctor: ${subscription.pricePerDoctor}</li>
-            <li>Total Price: ${totalPrice}</li>
+            <li>Doctors Allowed: ${subscription.doctorCount}</li>
+            <li>Total Price: ${subscription.totalPrice}</li>
             <li>Billing Cycle: ${subscription.billingCycle}</li>
             <li>Expires in: ${daysToExpiry} days</li>
             <li>Expiry Date: ${subscription.endDate.toLocaleDateString()}</li>
@@ -137,8 +135,6 @@ class SubscriptionCronService {
   }
 
   async sendExpirationEmail(subscription) {
-    const totalPrice = subscription.pricePerDoctor * subscription.doctorCount;
-    
     const emailContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #dc2626;">Subscription Expired</h2>
@@ -147,9 +143,8 @@ class SubscriptionCronService {
         <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
           <p><strong>Subscription Details:</strong></p>
           <ul>
-            <li>Active Doctors: ${subscription.doctorCount}</li>
-            <li>Price per Doctor: ${subscription.pricePerDoctor}</li>
-            <li>Total Price: ${totalPrice}</li>
+            <li>Doctors Allowed: ${subscription.doctorCount}</li>
+            <li>Total Price: ${subscription.totalPrice}</li>
             <li>Billing Cycle: ${subscription.billingCycle}</li>
             <li>Expired on: ${subscription.endDate.toLocaleDateString()}</li>
           </ul>

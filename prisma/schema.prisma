@@ -221,38 +221,10 @@ model VisitNote {
   @@map("visit_notes")
 }
 
-model MessageLog {
-  id              String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  hospitalId      String             @map("hospital_id") @db.Uuid
-  type            MessageType
-  status          MessageStatus      @default(PENDING)
-  recipient       String
-  subject         String?
-  messageBody     String             @map("message_body")
-  metadata        Json?
-  messageTemplate MessageTemplateType @map("message_template")
-  relatedId       String?            @map("related_id") @db.Uuid
-  cost            Decimal            @default(0)
-  retryCount      Int                @default(0) @map("retry_count")
-  errorMessage    String?            @map("error_message")
-  createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @updatedAt @map("updated_at")
-
-  // Relations
-  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-
-  @@index([hospitalId], name: "idx_message_logs_hospital_id")
-  @@index([type, status], name: "idx_message_logs_type_status")
-  @@map("message_logs")
-}
-
-model MessageQuota {
+model UsageStats {
   id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   hospitalId   String   @map("hospital_id") @db.Uuid
   month        DateTime @db.Date
-  doctorCount  Int      @map("doctor_count")
-  smsQuota     Int      @map("sms_quota")
-  emailQuota   Int      @map("email_quota")
   smsUsed      Int      @default(0) @map("sms_used")
   emailUsed    Int      @default(0) @map("email_used")
   updatedAt    DateTime @updatedAt @map("updated_at")

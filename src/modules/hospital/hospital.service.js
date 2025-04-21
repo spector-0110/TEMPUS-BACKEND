@@ -58,8 +58,8 @@ class HospitalService {
         }
       });
 
-      // Assign free plan subscription
-      const subscription = await subscriptionService.assignFreePlanToHospital(tx, hospital.id);
+      // Initialize with basic subscription
+      const subscription = await subscriptionService.createSubscription(hospital.id, 1, 'MONTHLY');
 
       // Queue welcome email
       await messageProcessor.publishNotification({
@@ -80,23 +80,22 @@ class HospitalService {
             </div>
 
             <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-              <p><strong>Your Free Plan Features:</strong></p>
+              <p><strong>Your Initial Subscription Details:</strong></p>
               <ul>
-                <li>Up to ${subscription.planFeatures.max_doctors} doctors</li>
-                <li>${subscription.planFeatures.base_sms_credits} SMS credits</li>
-                <li>${subscription.planFeatures.base_email_credits} email credits</li>
-                ${subscription.planFeatures.analytics_access ? '<li>Basic Analytics</li>' : ''}
-                ${subscription.planFeatures.reporting_access ? '<li>Basic Reporting</li>' : ''}
+                <li>Doctors Allowed: ${subscription.doctorCount}</li>
+                <li>Billing Cycle: ${subscription.billingCycle}</li>
+                <li>Total Price: ${subscription.totalPrice}</li>
+                <li>Valid until: ${subscription.endDate.toLocaleDateString()}</li>
               </ul>
-              <p><em>Valid for 1 month</em></p>
+              <p><em>You can upgrade your subscription anytime from the dashboard</em></p>
             </div>
 
-            <p>To upgrade your plan or add more features, visit your hospital dashboard.</p>
+            <p>To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
           </div>
         `
       });
 
-      return {...hospital,subscription};
+      return {...hospital, subscription};
     });
   }
 
@@ -184,10 +183,10 @@ class HospitalService {
   }
 
   async getDashboardStats(hospitalId) {
-    // Get current date for stats
-    const today = new Date();
-    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setDate(endOfDay.getDate() + 1);
 
     const [
       totalAppointments,
@@ -221,28 +220,16 @@ class HospitalService {
       prisma.hospitalSubscription.findFirst({
         where: { 
           hospitalId, 
-          status: 'active',
+          status: 'ACTIVE',
           endDate: {
             gt: new Date()
-          }
-        },
-        include: { 
-          plan: {
-            select: {
-              name: true,
-              maxDoctors: true,
-              features: true,
-              monthlyPrice: true,
-              yearlyPrice: true
-            }
           }
         }
       }),
       prisma.subscriptionHistory.findMany({
         where: { hospitalId },
         take: 5,
-        orderBy: { createdAt: 'desc' },
-        include: { plan: true }
+        orderBy: { createdAt: 'desc' }
       })
     ]);
 
@@ -256,22 +243,19 @@ class HospitalService {
         active: activeDoctors
       },
       subscription: subscription ? {
-        plan: subscription.plan.name,
         expiresAt: subscription.endDate,
         status: subscription.status,
-        maxDoctors: subscription.plan.maxDoctors,
-        features: subscription.plan.features,
-        credits: {
-          sms: subscription.smsCredits,
-          email: subscription.emailCredits
-        }
+        doctorCount: subscription.doctorCount,
+        billingCycle: subscription.billingCycle,
+        totalPrice: subscription.totalPrice,
+        autoRenew: subscription.autoRenew
       } : null,
       subscriptionHistory: subscriptionHistory.map(sub => ({
-        planName: sub.plan.name,
         startDate: sub.startDate,
         endDate: sub.endDate,
         status: sub.status,
-        price: sub.price,
+        doctorCount: sub.doctorCount,
+        totalPrice: sub.totalPrice,
         billingCycle: sub.billingCycle
       })),
       licenseWarnings: []
@@ -280,14 +264,14 @@ class HospitalService {
     // Add warnings if needed
     if (subscription) {
       // Check if approaching doctor limit
-      if (totalDoctors >= subscription.plan.maxDoctors * DOCTOR_LIMIT_WARNING_THRESHOLD) {
+      if (totalDoctors >= subscription.doctorCount * DOCTOR_LIMIT_WARNING_THRESHOLD) {
         stats.licenseWarnings.push({
           type: LICENSE_WARNING_TYPES.DOCTOR_LIMIT,
-          message: `You are approaching your doctor limit (${totalDoctors}/${subscription.plan.maxDoctors})`
+          message: `You are approaching your doctor limit (${totalDoctors}/${subscription.doctorCount})`
         });
       }
 
-      // Check if subscription expires in less than 7 days
+      // Check if subscription expires in less than warning threshold days
       const daysToExpiry = Math.ceil((subscription.endDate - new Date()) / (1000 * 60 * 60 * 24));
       if (daysToExpiry <= SUBSCRIPTION_EXPIRY_WARNING_DAYS) {
         stats.licenseWarnings.push({

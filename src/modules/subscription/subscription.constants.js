@@ -31,19 +31,11 @@ const MESSAGE_TEMPLATE = {
 const CACHE_KEYS = {
   HOSPITAL_SUBSCRIPTION: 'subscription:hospital:', // Append hospitalId
   USAGE_STATS: 'usage:hospital:', // Append hospitalId
-  MESSAGE_QUOTA: 'message:quota:' // Append hospitalId
 };
 
 const CACHE_EXPIRY = {
   HOSPITAL_SUBSCRIPTION: 30 * 60, // 30 minutes
   USAGE_STATS: 5 * 60, // 5 minutes
-  MESSAGE_QUOTA: 5 * 60 // 5 minutes
-};
-
-// Messages per doctor per month
-const MESSAGE_QUOTA_PER_DOCTOR = {
-  SMS: 100,
-  EMAIL: 500
 };
 
 const PRICING = {
@@ -55,11 +47,6 @@ const PRICING = {
     { minDoctors: 20, discount: 15 }, // 15% off for 20+ doctors
     { minDoctors: 50, discount: 20 }, // 20% off for 50+ doctors
   ]
-};
-
-const MESSAGE_COSTS = {
-  SMS: 1.0, // Cost per SMS
-  EMAIL: 0.5 // Cost per email
 };
 
 const LIMITS = {
@@ -79,9 +66,7 @@ module.exports = {
   MESSAGE_TEMPLATE,
   CACHE_KEYS,
   CACHE_EXPIRY,
-  MESSAGE_QUOTA_PER_DOCTOR,
   PRICING,
-  MESSAGE_COSTS,
   LIMITS,
   SUBSCRIPTION_EXPIRY_WARNING_DAYS
 };

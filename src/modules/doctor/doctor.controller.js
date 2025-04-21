@@ -38,17 +38,10 @@ class DoctorController {
         });
       }
 
-      if (error.message === 'Invalid subscription plan features') {
-        return res.status(400).json({ 
-          error: error.message,
-          message: 'Your subscription plan is misconfigured. Please contact support.' 
-        });
-      }
-
       if (error.message === 'Doctor limit reached for current subscription plan') {
         return res.status(403).json({ 
           error: error.message,
-          message: 'Please upgrade your subscription plan to add more doctors' 
+          message: 'Please upgrade your subscription to add more doctors' 
         });
       }
 

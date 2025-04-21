@@ -71,10 +71,10 @@ class SubscriptionController {
     try {
       const { doctorCount,billingCycle } = req.body;
 
-      if (!doctorCount) {
+      if (!doctorCount || !billingCycle) {
         return res.status(400).json({ 
           error: 'Validation failed',
-          message: 'Doctor count is required'
+          message: 'Doctor count and billing cycle are required'
         });
       }
 

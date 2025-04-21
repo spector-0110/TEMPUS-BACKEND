@@ -39,15 +39,21 @@
  * @property {number} doctors.total
  * @property {number} doctors.active
  * @property {Object} subscription
- * @property {string} subscription.plan
  * @property {Date} subscription.expiresAt
  * @property {string} subscription.status
- * @property {number} subscription.maxDoctors
- * @property {string[]} subscription.features
- * @property {Object} subscription.credits
- * @property {number} subscription.credits.sms
- * @property {number} subscription.credits.email
+ * @property {number} subscription.doctorCount
+ * @property {string} subscription.billingCycle
+ * @property {number} subscription.totalPrice
+ * @property {boolean} subscription.autoRenew
  * @property {Array<{type: string, message: string}>} licenseWarnings
+ * @property {Array<{
+ *   startDate: Date,
+ *   endDate: Date,
+ *   status: string,
+ *   doctorCount: number,
+ *   totalPrice: number,
+ *   billingCycle: string
+ * }>} subscriptionHistory
  */
 
 module.exports = {
