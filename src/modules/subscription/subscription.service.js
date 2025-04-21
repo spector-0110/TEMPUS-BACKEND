@@ -116,15 +116,15 @@ class SubscriptionService {
     });
   }
 
-  async createSubscription(hospitalId, doctorCount, billingCycle, paymentMethod, paymentDetails) {
+  async createSubscription(tx=null,hospitalId, doctorCount, billingCycle,paymentMethod=null, paymentDetails="Free Trail") {
     if (doctorCount < LIMITS.MIN_DOCTORS || doctorCount > LIMITS.MAX_DOCTORS) {
       throw new Error(`Doctor count must be between ${LIMITS.MIN_DOCTORS} and ${LIMITS.MAX_DOCTORS}`);
     }
-
+  
     if (!Object.values(BILLING_CYCLE).includes(billingCycle)) {
       throw new Error('Invalid billing cycle');
     }
-
+  
     const startDate = new Date();
     const endDate = new Date();
     if (billingCycle === BILLING_CYCLE.MONTHLY) {
@@ -132,11 +132,10 @@ class SubscriptionService {
     } else {
       endDate.setFullYear(endDate.getFullYear() + 1);
     }
-
+  
     const totalPrice = await this.calculatePrice(doctorCount, billingCycle);
-
-    const [subscription, hospital] = await prisma.$transaction(async (tx) => {
-      const subscription = await tx.hospitalSubscription.create({
+    const run = async (db) => {
+      const subscription = await db.hospitalSubscription.create({
         data: {
           hospitalId,
           doctorCount,
@@ -147,12 +146,11 @@ class SubscriptionService {
           status: SUBSCRIPTION_STATUS.ACTIVE,
           autoRenew: true,
           paymentMethod,
-          paymentDetails
+          paymentDetails,
         }
       });
-
-      // Create history entry
-      await tx.subscriptionHistory.create({
+  
+      await db.subscriptionHistory.create({
         data: {
           subscriptionId: subscription.id,
           hospitalId,
@@ -166,17 +164,19 @@ class SubscriptionService {
           createdAt: new Date()
         }
       });
-
-      const hospital = await tx.hospital.findUnique({
+  
+      const hospital = await db.hospital.findUnique({
         where: { id: hospitalId }
       });
-
+  
       return [subscription, hospital];
-    });
-
+    };
+  
+    const [subscription, hospital] = tx ? await run(tx) : await prisma.$transaction(run);
+  
     // Send email notification
-    const messageTrackingId=await this.sendSubscriptionEmail(subscription, 'Created', hospital);
-
+    const messageTrackingId = await this.sendSubscriptionEmail(subscription, 'Created', hospital);
+  
     return subscription;
   }
 

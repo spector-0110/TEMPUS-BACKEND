@@ -58,7 +58,7 @@ class HospitalService {
       });
 
       // Initialize with basic subscription
-      const subscription = await subscriptionService.createSubscription(hospital.id, 1, 'MONTHLY');
+      const subscription = await subscriptionService.createSubscription(tx,hospital.id, 1, 'MONTHLY');
 
       // Queue welcome email
       await messageService.sendMessage('email',{
