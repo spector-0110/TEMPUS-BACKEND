@@ -296,9 +296,16 @@ class RedisService {
     return this.executeWithCircuitBreaker(async () => {
       const client = await this.getClient();
       const value = await client.get(key);
+      
+      // Handle null case properly (key doesn't exist)
+      if (value === null) {
+        return null;
+      }
+
       try {
         return JSON.parse(value);
-      } catch {
+      } catch (parseError) {
+        // If parsing fails, return the raw value
         return value;
       }
     });
@@ -415,7 +422,18 @@ class RedisService {
       try {
         const client = await this.getClient();
         const val = await client.get(key);
-        return JSON.parse(val);
+        
+        // Handle null case properly (key doesn't exist)
+        if (val === null) {
+          return null;
+        }
+
+        try {
+          return JSON.parse(val);
+        } catch (parseError) {
+          // If parsing fails, return the raw value
+          return val;
+        }
       } catch (err) {
         retries++;
         if (retries >= this.MAX_RETRIES) throw err;

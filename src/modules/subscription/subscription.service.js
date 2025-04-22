@@ -55,7 +55,7 @@ class SubscriptionService {
   }
 
   async sendSubscriptionEmail(subscription, emailType, hospital) {
-    const formatCurrency = (amount) => `$${Number(amount).toFixed(2)}`;
+    const formatCurrency = (amount) => `₹${Number(amount).toFixed(2)}`;
     const formatDate = (date) => new Date(date).toLocaleDateString();
 
     const getEmailContent = () => {

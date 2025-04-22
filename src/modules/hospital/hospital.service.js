@@ -60,6 +60,9 @@ class HospitalService {
       // Initialize with basic subscription
       const subscription = await subscriptionService.createSubscription(tx,hospital.id, 1, 'MONTHLY');
 
+      // Define email type for welcome message
+      const emailType = 'Hospital';
+      
       // Queue welcome email
       await messageService.sendMessage('email',{
         to: userEmail,
@@ -71,30 +74,39 @@ class HospitalService {
         timestamp: new Date().toISOString()
         },
         content: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #2563EB;">Welcome to Tempus!</h2>
-            <p>Dear Admin,</p>
-            <p>Your hospital "${hospital.name}" has been successfully registered with Tempus. Here are your details:</p>
-            
-            <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-              <p><strong>Hospital Name:</strong> ${hospital.name}</p>
-              <p><strong>Subdomain:</strong> ${hospital.subdomain}</p>
-              <p><strong>Admin Email:</strong> ${hospital.adminEmail}</p>
-              ${hospital.address ? `<p><strong>Address:</strong> ${JSON.stringify(hospital.address)}</p>` : ''}
-            </div>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #2563EB;">Welcome to Tempus!</h2>
+              <p>Dear Admin,</p>
+              <p>Your hospital "${hospital.name}" has been successfully registered with Tempus. Here are your details:</p>
+              
+              <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+                <p><strong>Hospital Name:</strong> ${hospital.name}</p>
+                <p><strong>Subdomain:</strong> ${hospital.subdomain}</p>
+                <p><strong>Admin Email:</strong> ${hospital.adminEmail}</p>
+                ${
+                  hospital.address ? `
+                    <p><strong>Address:</strong></p>
+                    <p>
+                      ${hospital.address.street},<br>
+                      ${hospital.address.city}, ${hospital.address.state} - ${hospital.address.pincode}<br>
+                      ${hospital.address.country}
+                    </p>
+                  ` : ''
+                }
+              </div>
 
-            <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-              <p><strong>Your Initial Subscription Details:</strong></p>
-              <ul>
-                <li>Doctors Allowed: ${subscription.doctorCount}</li>
-                <li>Valid until: ${subscription.endDate.toLocaleDateString()}</li>
-              </ul>
-              <p><em>You can upgrade your subscription anytime from the dashboard</em></p>
-            </div>
+              <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+                <p><strong>Your Initial Subscription Details:</strong></p>
+                <ul>
+                  <li>Doctors Allowed: ${subscription.doctorCount}</li>
+                  <li>Valid until: ${subscription.endDate.toLocaleDateString()}</li>
+                </ul>
+                <p><em>You can upgrade your subscription anytime from the dashboard</em></p>
+              </div>
 
-            <p>To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
-          </div>
-        `
+              <p>To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
+            </div>
+          `
       });
 
       return {...hospital, subscription};
@@ -127,12 +139,12 @@ class HospitalService {
     const otp = await otpService.generateOTP(hospitalId);
 
     // Send OTP via email using message service
-    await messageService.sendMessage('email',{
-      to: userEmail,
+    await messageService.sendMessage('otp',{
+      to: hospital.adminEmail,
       subject: 'OTP Verification for Hospital Edit',
       hospitalId: hospital.id,
       metadata: {
-      timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString()
       },
       content: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -142,7 +154,7 @@ class HospitalService {
           <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0; text-align: center;">
             <h1 style="color: #2563EB; font-size: 32px;">${otp}</h1>
           </div>
-          <p>This OTP will expire in 10 minutes.</p>
+          <p>This OTP will expire in 5 minutes.</p>
           <p>If you did not request this OTP, please ignore this email.</p>
         </div>
       `,
@@ -204,38 +216,31 @@ class HospitalService {
     // Invalidate edit verification status after successful update
     await otpService.invalidateEditVerificationStatus(hospitalId);
 
+    // Define email type for welcome message
+    const emailType = 'Hospital';
+    
     await messageService.sendMessage('email',{
       to: updatedHospital.adminEmail,
       subject: 'Hospital Details Updated',
       hospitalId: updatedHospital.id,
       metadata: {
-      subscriptionId: subscription.id,
       emailType: `Details Update${emailType.toLowerCase()}`,
       timestamp: new Date().toISOString()
       },
       content: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563EB;">Welcome to Tempus!</h2>
+          <h2 style="color: #2563EB;">Hospital Details Updated</h2>
           <p>Dear Admin,</p>
-          <p>Your hospital "${updatedHospital.name}" details has been successfully updated with Tempus. Here are your details:</p>
+          <p>Your hospital "${updatedHospital.name}" details have been successfully updated in Tempus. Here are your details:</p>
           
           <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
             <p><strong>Hospital Name:</strong> ${updatedHospital.name}</p>
             <p><strong>Subdomain:</strong> ${updatedHospital.subdomain}</p>
             <p><strong>Admin Email:</strong> ${updatedHospital.adminEmail}</p>
-            ${updatedHospital.address ? `<p><strong>Address:</strong> ${JSON.stringify(updatedHospital.address)}</p>` : ''}
+            ${updatedHospital.address ? `<p><strong>Address:</strong> ${updatedHospital.address}</p>` : ''}
           </div>
 
-          <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-            <p><strong>Your Initial Subscription Details:</strong></p>
-            <ul>
-              <li>Doctors Allowed: ${subscription.doctorCount}</li>
-              <li>Valid until: ${subscription.endDate.toLocaleDateString()}</li>
-            </ul>
-            <p><em>You can upgrade your subscription anytime from the dashboard</em></p>
-          </div>
-
-          <p>To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
+          <p>You can view and manage your hospital settings through the dashboard.</p>
         </div>
       `
     });

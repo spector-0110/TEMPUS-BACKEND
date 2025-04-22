@@ -235,35 +235,39 @@ class RabbitMQService {
       ...this.persistenceConfig,
       ...options,
       // Additional queue options for better reliability
-      deadLetterExchange: `${queueName}.dlx`,
-      maxLength: 1000000,
-      messageTtl: 86400000, // 24 hours
+      deadLetterExchange: options.deadLetterExchange === true ? `${queueName}.dlx` : options.deadLetterExchange,
+      maxLength: options.maxLength || 1000000,
+      messageTtl: options.messageTtl || 86400000, // 24 hours
       // Enable queue mirroring for high availability
       'x-ha-policy': 'all',
       // Lazy queues - messages will be written to disk more aggressively
       'x-queue-mode': options.lazy ? 'lazy' : 'default'
     };
-
+  
     try {
-      // First try to check if queue exists
-      await channel.checkQueue(queueName);
-      this.log('INFO', `Queue ${queueName} already exists`);
+      // Just assert the queue - this will create it if it doesn't exist
+      // or return the existing one if it does
+      const { queue } = await channel.assertQueue(queueName, queueOptions);
+      this.log('INFO', `Queue ${queueName} asserted successfully`);
+      
+      // Setup dead letter exchange and queue if requested
+      if (queueOptions.deadLetterExchange) {
+        const dlxName = queueOptions.deadLetterExchange;
+        const dlqName = `${queueName}.dlq`;
+        
+        await channel.assertExchange(dlxName, 'direct', { durable: true });
+        await channel.assertQueue(dlqName, {
+          durable: true,
+          deadLetterExchange: '',
+          deadLetterRoutingKey: queueName,
+          messageTtl: 7 * 24 * 60 * 60 * 1000 // 7 days retention for dead letters
+        });
+        await channel.bindQueue(dlqName, dlxName, queueName);
+      }
+      return queue;
     } catch (error) {
-      // Queue doesn't exist, create it with specified options
-      await channel.assertQueue(queueName, queueOptions);
-      
-      // Create and bind dead letter queue
-      const dlxName = `${queueName}.dlx`;
-      const dlqName = `${queueName}.dlq`;
-      
-      await channel.assertExchange(dlxName, 'direct', { durable: true });
-      await channel.assertQueue(dlqName, {
-        durable: true,
-        deadLetterExchange: '',
-        deadLetterRoutingKey: queueName,
-        messageTtl: 7 * 24 * 60 * 60 * 1000 // 7 days retention for dead letters
-      });
-      await channel.bindQueue(dlqName, dlxName, queueName);
+      this.log('ERROR', `Failed to create queue ${queueName}`, {}, error);
+      throw error;
     }
   }
 
