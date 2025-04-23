@@ -3,6 +3,7 @@ const otpService = require('../../services/otp.service');
 const hospitalValidator = require('./hospital.validator');
 const subscriptionService = require('../subscription/subscription.service');
 const messageService = require('../notification/message.service');
+const redisService = require('../../services/redis.service');
 const { 
   ALLOWED_UPDATE_FIELDS, 
   DEFAULT_THEME_COLOR,
@@ -249,105 +250,228 @@ class HospitalService {
   }
 
   async getDashboardStats(hospitalId) {
+    // Try to get stats from cache first
+    const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
+    const CACHE_EXPIRY = 5 * 60; // 5 minutes cache
+    
+    try {
+      const cachedStats = await redisService.getCache(CACHE_KEY);
+      if (cachedStats) {
+        return cachedStats;
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard stats from cache:', error);
+      // Continue to fetch from database if cache fails
+    }
+
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(startOfDay);
     endOfDay.setDate(endOfDay.getDate() + 1);
+    
+    // Get tomorrow's date range
+    const startOfTomorrow = new Date(startOfDay);
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+    const endOfTomorrow = new Date(startOfTomorrow);
+    endOfTomorrow.setDate(endOfTomorrow.getDate() + 1);
+    
+    // Get date for 7 days ago
+    const sevenDaysAgo = new Date(startOfDay);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const [
-      totalAppointments,
-      todayAppointments,
-      totalDoctors,
-      activeDoctors,
-      subscription,
-      subscriptionHistory
-    ] = await Promise.all([
-      prisma.appointment.count({ where: { hospitalId } }),
-      prisma.appointment.count({
-        where: {
-          hospitalId,
-          appointmentDate: {
-            gte: startOfDay,
-            lte: endOfDay
+    try {
+      const [
+        todayAppointments,
+        tomorrowAppointments,
+        appointmentHistory,
+        doctorsList,
+        subscription,
+        subscriptionHistory,
+        hospitalDetails
+      ] = await Promise.all([
+        // Today's appointment details
+        prisma.appointment.findMany({
+          where: {
+            hospitalId,
+            appointmentDate: {
+              gte: startOfDay,
+              lt: endOfDay
+            }
+          },
+          include: {
+            doctor: {
+              select: {
+                id: true,
+                name: true,
+                specialization: true,
+              }
+            }
+          },
+          orderBy: {
+            startTime: 'asc'
           }
-        }
-      }),
-      prisma.doctor.count({ where: { hospitalId } }),
-      prisma.doctor.count({
-        where: {
-          hospitalId,
-          schedules: {
-            some: {
-              status: 'active'
+        }),
+        // Tomorrow's appointment details
+        prisma.appointment.findMany({
+          where: {
+            hospitalId,
+            appointmentDate: {
+              gte: startOfTomorrow,
+              lt: endOfTomorrow
+            }
+          },
+          include: {
+            doctor: {
+              select: {
+                id: true,
+                name: true,
+                specialization: true,
+              }
+            }
+          },
+          orderBy: {
+            startTime: 'asc'
+          }
+        }),
+        // Last 7 days appointment history
+        prisma.appointment.groupBy({
+          by: ['appointmentDate', 'status'],
+          where: {
+            hospitalId,
+            appointmentDate: {
+              gte: sevenDaysAgo,
+              lte: now
+            }
+          },
+          _count: {
+            id: true
+          }
+        }),
+        // All doctor details
+        prisma.doctor.findMany({
+          where: { hospitalId },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            specialization: true,
+            qualification: true,
+            experience: true,
+            status: true,
+            schedules: {
+              select: {
+                dayOfWeek: true,
+                timeRanges: true,
+                status: true
+              }
             }
           }
-        }
-      }),
-      prisma.hospitalSubscription.findFirst({
-        where: { 
-          hospitalId, 
-          status: 'ACTIVE',
-          endDate: {
-            gt: new Date()
+        }),
+        // Current active subscription
+        prisma.hospitalSubscription.findFirst({
+          where: { 
+            hospitalId, 
+            status: 'ACTIVE',
+            endDate: {
+              gt: new Date()
+            }
           }
+        }),
+        // Subscription history
+        prisma.subscriptionHistory.findMany({
+          where: { hospitalId },
+          orderBy: { createdAt: 'desc' }
+        }),
+        // Hospital details
+        prisma.hospital.findUnique({
+          where: { id: hospitalId }
+        })
+      ]);
+
+      // Process appointment history by date
+      const appointmentsByDate = {};
+      appointmentHistory.forEach(entry => {
+        const dateStr = entry.appointmentDate.toISOString().split('T')[0];
+        if (!appointmentsByDate[dateStr]) {
+          appointmentsByDate[dateStr] = {
+            date: entry.appointmentDate,
+            booked: 0,
+            completed: 0,
+            cancelled: 0,
+            missed: 0,
+            total: 0
+          };
         }
-      }),
-      prisma.subscriptionHistory.findMany({
-        where: { hospitalId },
-        take: 5,
-        orderBy: { createdAt: 'desc' }
-      })
-    ]);
+        appointmentsByDate[dateStr][entry.status.toLowerCase()] = entry._count.id;
+        appointmentsByDate[dateStr].total += entry._count.id;
+      });
 
-    const stats = {
-      appointments: {
-        total: totalAppointments,
-        today: todayAppointments
-      },
-      doctors: {
-        total: totalDoctors,
-        active: activeDoctors
-      },
-      subscription: subscription ? {
-        expiresAt: subscription.endDate,
-        status: subscription.status,
-        doctorCount: subscription.doctorCount,
-        billingCycle: subscription.billingCycle,
-        totalPrice: subscription.totalPrice,
-        autoRenew: subscription.autoRenew
-      } : null,
-      subscriptionHistory: subscriptionHistory.map(sub => ({
-        startDate: sub.startDate,
-        endDate: sub.endDate,
-        status: sub.status,
-        doctorCount: sub.doctorCount,
-        totalPrice: sub.totalPrice,
-        billingCycle: sub.billingCycle
-      })),
-      licenseWarnings: []
-    };
+      const stats = {
+        hospitalInfo: hospitalDetails,
+        appointments: {
+          upcoming: {
+            today: todayAppointments.map(apt => ({
+              id: apt.id,
+              patientName: apt.patientName,
+              time: apt.startTime,
+              status: apt.status,
+              doctor: apt.doctor ? {
+                id: apt.doctor.id,
+                name: apt.doctor.name,
+                specialization: apt.doctor.specialization
+              } : null
+            })),
+            tomorrow: tomorrowAppointments.map(apt => ({
+              id: apt.id,
+              patientName: apt.patientName,
+              time: apt.startTime,
+              status: apt.status,
+              doctor: apt.doctor ? {
+                id: apt.doctor.id,
+                name: apt.doctor.name,
+                specialization: apt.doctor.specialization
+              } : null
+            }))
+          },
+          history: Object.values(appointmentsByDate).sort((a, b) => 
+            new Date(a.date) - new Date(b.date)
+          )
+        },
+        doctors: doctorsList,
+        currentSubscription: subscription ? {
+          id: subscription.id,
+          expiresAt: subscription.endDate,
+          status: subscription.status,
+          doctorCount: subscription.doctorCount,
+          billingCycle: subscription.billingCycle,
+          totalPrice: subscription.totalPrice,
+          autoRenew: subscription.autoRenew
+        } : null,
+        subscriptionHistory: subscriptionHistory.map(sub => ({
+          id: sub.id,
+          startDate: sub.startDate,
+          endDate: sub.endDate,
+          status: sub.status || 'ACTIVE',
+          doctorCount: sub.doctorCount,
+          totalPrice: sub.totalPrice,
+          billingCycle: sub.billingCycle
+        }))
+      };
 
-    // Add warnings if needed
-    if (subscription) {
-      // Check if approaching doctor limit
-      if (totalDoctors >= subscription.doctorCount * DOCTOR_LIMIT_WARNING_THRESHOLD) {
-        stats.licenseWarnings.push({
-          type: LICENSE_WARNING_TYPES.DOCTOR_LIMIT,
-          message: `You are approaching your doctor limit (${totalDoctors}/${subscription.doctorCount})`
-        });
+      // Cache the results for better performance
+      try {
+        await redisService.setCache(CACHE_KEY, stats, CACHE_EXPIRY);
+      } catch (error) {
+        console.error('Error caching dashboard stats:', error);
+        // Continue without caching if it fails
       }
 
-      // Check if subscription expires in less than warning threshold days
-      const daysToExpiry = Math.ceil((subscription.endDate - new Date()) / (1000 * 60 * 60 * 24));
-      if (daysToExpiry <= SUBSCRIPTION_EXPIRY_WARNING_DAYS) {
-        stats.licenseWarnings.push({
-          type: LICENSE_WARNING_TYPES.SUBSCRIPTION_EXPIRING,
-          message: `Your subscription expires in ${daysToExpiry} days`
-        });
-      }
+      return stats;
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+      throw new Error('Failed to fetch dashboard statistics');
     }
-
-    return stats;
   }
 
   async hospitalExistsBySupabaseId(supabaseUserId) {
