@@ -97,7 +97,6 @@ class MessageService {
       case MESSAGE_TYPE.EMAIL:{
 
         queueName = this.queues.email;
-        console.log("queueName", queueName);
         break;
       }
       case MESSAGE_TYPE.SMS:

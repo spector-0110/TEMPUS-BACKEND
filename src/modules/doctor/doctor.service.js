@@ -131,7 +131,7 @@ class DoctorService {
     // Invalidate caches
     await Promise.all([
       redisService.invalidateCache(CACHE_KEYS.DOCTOR_DETAILS + doctorId),
-      this.invalidateDoctorListCache(hospitalId)
+      await redisService.invalidateCache(CACHE_KEYS.DOCTOR_LIST + hospitalId)
     ]);
 
     // Send details change notification
