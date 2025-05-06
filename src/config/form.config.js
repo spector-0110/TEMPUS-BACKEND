@@ -40,19 +40,8 @@ const defaultHospitalFormConfig = {
           type: 'tel',
           required: true,
           validation: {
-            pattern: '^\\+?[\\d\\s-]{8,15}$', // More strict length limits
-            message: 'Enter a valid phone number (8-15 digits)'
-          }
-        },
-        {
-          id: 'contactInfo.email',
-          label: 'Contact Email',
-          type: 'email',
-          required: false,
-          validation: {
-            pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
-            maxLength: 254, // Standard email length limit
-            message: 'Enter a valid email address'
+            pattern: '^\\+?[\\d\\s-]{10}$', // More strict length limits
+            message: 'Enter a valid phone number (10 digits)'
           }
         },
         {
@@ -93,6 +82,17 @@ const defaultHospitalFormConfig = {
           }
         },
         {
+          id: 'address.district',
+          label: 'District',
+          type: 'text',
+          required: true,
+          validation: {
+            pattern: '^[\\w\\s\\-\']+$',
+            minLength: 2,
+            maxLength: 100
+          }
+        },
+        {
           id: 'address.state',
           label: 'State',
           type: 'text',
@@ -124,7 +124,7 @@ const defaultHospitalFormConfig = {
           id: 'gstin',
           label: 'GSTIN',
           type: 'text',
-          required: false,
+          required: true,
           validation: {
             pattern: '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$',
             message: 'Enter a valid GSTIN',
@@ -157,7 +157,7 @@ const defaultHospitalFormConfig = {
           id: 'establishedDate',
           label: 'Established Date',
           type: 'date',
-          required: false,
+          required: true,
           validation: {
             max: new Date().toISOString().split('T')[0], // Cannot be in the future
             message: 'Establishment date cannot be in the future'

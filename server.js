@@ -8,7 +8,7 @@ const { testConnection, disconnect } = require('./src/services/database.service'
 const subscriptionCronService = require('./src/modules/subscription/subscription.cron');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
-const patientRoutes = require('./src/routes/patient.routes');
+// const patientRoutes = require('./src/routes/patient.routes');
 const doctorRoutes = require('./src/routes/doctor.routes');
 
 const app = express();
@@ -81,7 +81,7 @@ app.get('/health', async (req, res) => {
 // Routes
 app.use('/api/hospitals', hospitalRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
-app.use('/api/patients', patientRoutes);
+// app.use('/api/patients', patientRoutes);
 app.use('/api/doctors', doctorRoutes);
 
 // Basic route

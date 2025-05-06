@@ -89,7 +89,7 @@ class HospitalService {
                     <p><strong>Address:</strong></p>
                     <p>
                       ${hospital.address.street},<br>
-                      ${hospital.address.city}, ${hospital.address.state} - ${hospital.address.pincode}<br>
+                      ${hospital.address.district}, ${hospital.address.state} - ${hospital.address.pincode}<br>
                       ${hospital.address.country}
                     </p>
                   ` : ''

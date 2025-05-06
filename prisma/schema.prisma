@@ -61,6 +61,7 @@ model Hospital {
   logo                String?
   themeColor          String?                @map("theme_color")
   createdAt           DateTime               @default(now()) @map("created_at")
+  establishedDate     String               @map("established_date")
   
   //Relation::
   doctors             Doctor[]

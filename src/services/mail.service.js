@@ -8,7 +8,7 @@ class MailService {
 
     this.RATE_LIMIT = {
       WINDOW: 3600, // 1 hour
-      MAX_EMAILS: 100 // per hospital
+      MAX_EMAILS: 50 // per hospital
     };
   }
 
