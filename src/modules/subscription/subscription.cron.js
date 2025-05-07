@@ -21,7 +21,7 @@ class SubscriptionCronService {
       this.sendExpiryWarnings();
     });
 
-    console.log('✅ Subscription cron jobs scheduled');
+    console.log(' Subscription cron jobs scheduled');
   }
 
   stopCronJobs() {

@@ -4,7 +4,6 @@ const hospitalController = require('../modules/hospital/hospital.controller');
 const authMiddleware = require('../middleware/auth.middleware');
 const superAdminMiddleware = require('../middleware/superadmin.middleware');
 
-// Public routes (if any)
 
 // Form configuration routes
 router.get('/form-config', hospitalController.getFormConfig);
@@ -14,7 +13,6 @@ router.post('/form-config/reset', superAdminMiddleware, hospitalController.reset
 // Initial registration route - needs auth but not hospital_id
 router.post('/initial-details', authMiddleware, hospitalController.createHospital);
     
-// Protected routes - need both auth and hospital_id
 router.use(authMiddleware);
 
 // Hospital information

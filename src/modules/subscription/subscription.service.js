@@ -10,8 +10,6 @@ const {
   LIMITS
 } = require('./subscription.constants');
 
-
-
 class SubscriptionService {
 
 
@@ -116,7 +114,7 @@ class SubscriptionService {
     });
   }
 
-  async createSubscription(tx=null,hospitalId, doctorCount, billingCycle,paymentMethod=null, paymentDetails="Free Trail") {
+  async createSubscription(tx=null,hospitalId, doctorCount, billingCycle,paymentMethod=null, paymentDetails="Trail") {
     if (doctorCount < LIMITS.MIN_DOCTORS || doctorCount > LIMITS.MAX_DOCTORS) {
       throw new Error(`Doctor count must be between ${LIMITS.MIN_DOCTORS} and ${LIMITS.MAX_DOCTORS}`);
     }
@@ -224,8 +222,8 @@ class SubscriptionService {
           totalPrice,
           startDate,
           endDate,
-          paymentMethod: paymentMethod || subscription.paymentMethod,
-          paymentDetails: paymentDetails || subscription.paymentDetails,
+          paymentMethod: paymentMethod,
+          paymentDetails: paymentDetails,
           createdAt: new Date()
         }
       });

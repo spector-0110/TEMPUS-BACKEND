@@ -132,28 +132,6 @@ const defaultHospitalFormConfig = {
           }
         },
         {
-          id: 'logo',
-          label: 'Hospital Logo',
-          type: 'file',
-          required: false,
-          validation: {
-            acceptedTypes: ['image/jpeg', 'image/png', 'image/webp'],
-            maxSize: 2 * 1024 * 1024, // 2MB
-            message: 'Please upload a JPEG, PNG, or WebP image up to 2MB'
-          }
-        },
-        {
-          id: 'themeColor',
-          label: 'Theme Color',
-          type: 'color',
-          required: false,
-          defaultValue: '#2563EB',
-          validation: {
-            pattern: '^#[0-9A-Fa-f]{6}$',
-            message: 'Please select a valid color'
-          }
-        },
-        {
           id: 'establishedDate',
           label: 'Established Date',
           type: 'date',

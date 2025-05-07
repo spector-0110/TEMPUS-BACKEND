@@ -4,37 +4,67 @@ class HospitalValidator {
   async validateFormData(data) {
     const formConfig = await formService.getConfig();
     const errors = [];
-    const transformedData = { ...data };
-
-    // Iterate through sections and validate each field
-    for (const section of formConfig.sections) {
-      for (const field of section.fields) {
-        const value = this.getNestedValue(data, field.id);
-        
-        // Skip validation if field is not required and value is not provided
-        if (!field.required && (value === undefined || value === null || value === '')) {
-          continue;
-        }
-
-        const validationResult = await formService.validateFieldValue(field, value);
-        
-        if (!validationResult.isValid) {
-          errors.push({
-            field: field.id,
-            label: field.label,
-            errors: validationResult.errors
-          });
-        } else if (validationResult.transformedValue !== undefined) {
-          this.setNestedValue(transformedData, field.id, validationResult.transformedValue);
-        }
+    const transformedData = {}; 
+  
+    // Flatten form config fields
+    const flattenedFields = this.flattenFormFields(formConfig.sections);
+  
+    for (const field of flattenedFields) {
+      const value = data[field.id];
+  
+      console.log(`Validating field: ${field.id}, value: ${value}`);
+  
+      if (!field.required && (value === undefined || value === null || value === '')) {
+        continue;
+      }
+  
+      const validationResult = await formService.validateFieldValue(field, value);
+  
+      if (!validationResult.isValid) {
+        errors.push({
+          field: field.id,
+          label: field.label,
+          errors: validationResult.errors
+        });
+      } else if (validationResult.transformedValue !== undefined) {
+        setNestedValue(transformedData, field.id, validationResult.transformedValue);
+      } else {
+        setNestedValue(transformedData, field.id, value);
       }
     }
-
+  
     return {
       isValid: errors.length === 0,
       errors,
       transformedData
     };
+  }
+
+  // Helper to flatten form fields with dot notation
+  flattenFormFields(sections) {
+    const flattenedFields = [];
+    
+    const flattenField = (field, prefix = '') => {
+      if (field.fields) {
+        const newPrefix = prefix ? `${prefix}${field.id}.` : `${field.id}.`;
+        for (const nestedField of field.fields) {
+          flattenField(nestedField, newPrefix);
+        }
+      } else {
+        flattenedFields.push({
+          ...field,
+          id: prefix ? `${prefix}${field.id}` : field.id
+        });
+      }
+    };
+
+    for (const section of sections) {
+      for (const field of section.fields) {
+        flattenField(field);
+      }
+    }
+    
+    return flattenedFields;
   }
 
   validateContactInfo(contactInfo) {
@@ -53,23 +83,43 @@ class HospitalValidator {
 
     return true;
   }
+}
 
-  // Helper to get nested object value by path
-  getNestedValue(obj, path) {
-    return path.split('.').reduce((current, key) => 
-      current ? current[key] : undefined, obj);
-  }
 
-  // Helper to set nested object value by path
-  setNestedValue(obj, path, value) {
-    const keys = path.split('.');
-    const lastKey = keys.pop();
-    const target = keys.reduce((current, key) => {
+
+// utils/objectHelper.js
+function setNestedValue(obj, path, value) {
+  const keys = path.split('.');
+  let current = obj;
+
+  keys.forEach((key, index) => {
+    if (index === keys.length - 1) {
+      current[key] = value;
+    } else {
       if (!current[key]) current[key] = {};
-      return current[key];
-    }, obj);
-    target[lastKey] = value;
-  }
+      current = current[key];
+    }
+  });
+
+  return obj;
+}
+
+
+function setNestedValue(obj, path, value) {
+  const keys = path.split('.');
+  let current = obj;
+
+  keys.forEach((key, index) => {
+    if (index === keys.length - 1) {
+      current[key] = value;
+    } else {
+      if (!current[key]) current[key] = {};
+      current = current[key];
+    }
+  });
+
+  return obj;
 }
 
 module.exports = new HospitalValidator();
+

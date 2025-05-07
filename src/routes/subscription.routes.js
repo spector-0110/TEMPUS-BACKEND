@@ -22,7 +22,7 @@ router.get('/history/:hospitalId', subscriptionController.getSubscriptionHistory
 router.post('/create', validateCreateSubscription, subscriptionController.createSubscription);
 
 // Update doctor count with validation
-router.put('/update-doctors', validateUpdateDoctorCount, subscriptionController.updateDoctorCount);
+router.put('/update-doctors-count', validateUpdateDoctorCount, subscriptionController.updateDoctorCount);
 
 // Renew subscription with validation
 router.post('/renew', validateRenewSubscription, subscriptionController.renewSubscription);

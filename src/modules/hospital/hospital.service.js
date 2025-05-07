@@ -24,6 +24,9 @@ class HospitalService {
 
     const validatedData = validationResult.transformedData;
 
+    console.log('Validated Data:', validatedData);
+
+
     if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
       throw new Error('Hospital already exists for this user');
     }
@@ -50,8 +53,18 @@ class HospitalService {
           subdomain: validatedData.subdomain.toLowerCase(),
           adminEmail: userEmail,
           gstin: validatedData.gstin,
-          address: validatedData.address,
-          contactInfo: validatedData.contactInfo,
+          address: {
+            street: validatedData.address.street,
+            city: validatedData.address.city,
+            district: validatedData.address.district,
+            state: validatedData.address.state,
+            pincode: validatedData.address.pincode,
+            country: validatedData.address.country || 'India' // Default country
+          },
+          contactInfo: {
+            phone: validatedData.contactInfo.phone,
+            website: validatedData.contactInfo.website || null
+          },
           logo: validatedData.logo,
           themeColor: validatedData.themeColor || DEFAULT_THEME_COLOR,
           establishedDate: validatedData.establishedDate
@@ -204,8 +217,14 @@ class HospitalService {
 
     // Format address if provided
     if (sanitizedData.address) {
-      const addr = sanitizedData.address;
-      sanitizedData.address = `${addr.street}, ${addr.city}, ${addr.state}, ${addr.pincode}`;
+      sanitizedData.address = {
+        street: sanitizedData.address.street,
+        city: sanitizedData.address.city,
+        district: sanitizedData.address.district,
+        state: sanitizedData.address.state,
+        pincode: sanitizedData.address.pincode,
+        country: sanitizedData.address.country || 'India'
+      };
     }
 
     // Update hospital details
