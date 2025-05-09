@@ -10,6 +10,7 @@ class FormConfigService {
 
   async initializeConfig() {
     try {
+      console.log('Initializing form config...');
       const existingConfig = await redisService.getCache(this.CACHE_KEY);
       if (!existingConfig) {
         await this.updateConfig(defaultConfig);
@@ -22,6 +23,7 @@ class FormConfigService {
 
   async getConfig() {
     try {
+      console.log('Fetching form config...');
       const config = await redisService.getCache(this.CACHE_KEY);
       return config || defaultConfig;
     } catch (error) {

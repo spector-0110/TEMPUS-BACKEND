@@ -24,7 +24,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^6.10.1",
     "prisma": "^6.6.0",
-    "redis": "^4.7.0",
+    "razorpay": "^2.9.6",
     "zod": "^3.24.3"
   },
   "devDependencies": {

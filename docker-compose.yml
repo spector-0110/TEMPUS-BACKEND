@@ -1,0 +1,80 @@
+version: '3.9'
+
+services:
+  # Redis Service
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      timeout: 10s
+    networks:
+      - app-network
+
+  # RabbitMQ Node 1
+  rabbitmq1:
+    image: rabbitmq:3.12-management
+    container_name: rabbitmq1
+    hostname: rabbitmq1
+    ports:
+      - "5672:5672"
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "secret_cookie"
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - app-network
+
+  # RabbitMQ Node 2
+  rabbitmq2:
+    image: rabbitmq:3.12
+    container_name: rabbitmq2
+    hostname: rabbitmq2
+    depends_on:
+      - rabbitmq1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "secret_cookie"
+    networks:
+      - app-network
+
+  # RabbitMQ Node 3
+  rabbitmq3:
+    image: rabbitmq:3.12
+    container_name: rabbitmq3
+    hostname: rabbitmq3
+    depends_on:
+      - rabbitmq1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "secret_cookie"
+    networks:
+      - app-network
+
+  # Node.js App
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: Tempus-Backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - rabbitmq1
+      - rabbitmq2
+      - rabbitmq3
+    env_file:
+      - .env
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
