@@ -13,5 +13,6 @@ router.get('/', doctorController.listDoctors);
 router.get('/:id', doctorController.getDoctorDetails);
 router.put('/:id', doctorController.updateDoctorDetails);
 router.put('/:id/:dayOfWeek', doctorController.updateDoctorSchedule);
+// add delete doctor route::
 
 module.exports = router;

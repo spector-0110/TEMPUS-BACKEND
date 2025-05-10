@@ -30,6 +30,7 @@ const authMiddleware = async (req, res, next) => {
       }
       
       user.hospital_id = hospital.id;
+      user.hospital= hospital;
     }
 
     req.user = user;

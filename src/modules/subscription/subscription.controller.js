@@ -30,8 +30,7 @@ class SubscriptionController {
 
   async getSubscriptionHistory(req, res) {
     try {
-      const { hospitalId } = req.params;
-      const history = await subscriptionService.getSubscriptionHistory(hospitalId);
+      const history = await subscriptionService.getSubscriptionHistory(req.user.hospital_id);
 
       return res.status(200).json({
         success: true,
@@ -47,9 +46,9 @@ class SubscriptionController {
 
   async createSubscription(req, res) {
     try {
-      const { hospitalId, doctorCount, billingCycle, paymentMethod, paymentDetails } = req.body;
+      const { doctorCount, billingCycle, paymentMethod, paymentDetails } = req.body;
       const subscription = await subscriptionService.createSubscription(
-        hospitalId,
+        req.user.hospital_id,
         doctorCount,
         billingCycle,
         paymentMethod,
@@ -68,55 +67,69 @@ class SubscriptionController {
     }
   }
 
-  async updateDoctorCount(req, res) {
-    try {
-      const { hospitalId, newDoctorCount, billingCycle, paymentMethod, paymentDetails } = req.body;
-      const subscription = await subscriptionService.updateDoctorCount(
-        hospitalId,
-        newDoctorCount,
-        billingCycle,
-        paymentMethod,
-        paymentDetails
+  async createRenewSubscription(req, res) {
+  try {
+    const { billingCycle, updatedDoctorsCount } = req.body;
+
+    if (!req.user || !req.user.hospital_id) {
+      throw new Error('Hospital ID is missing or invalid');
+    }
+
+    const razorpayOrder = await subscriptionService.createRenewSubscription(
+      req.user.hospital_id,
+      billingCycle, 
+      updatedDoctorsCount,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: razorpayOrder // Send the Razorpay order object
+    });
+  } catch (error) {
+    console.error('Error in renewing subscription:', error.message);  // Log the error for debugging
+
+    return res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+  }
+
+  async verifySubscription(req, res) {
+    try{
+
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required parameters'
+        });
+      }
+
+      const data = await subscriptionService.verifyAndUpdateSubscription(
+        req.user.hospital,
+        req.user.hospital_id,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature
       );
 
       return res.status(200).json({
         success: true,
-        data: subscription
-      });
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        error: error.message
-      });
+        data: data
+      }); 
+
+    }catch(error){
+
     }
+
   }
 
-  async renewSubscription(req, res) {
-    try {
-      const { hospitalId, billingCycle, paymentMethod, paymentDetails } = req.body;
-      const subscription = await subscriptionService.renewSubscription(
-        hospitalId,
-        billingCycle,
-        paymentMethod,
-        paymentDetails
-      );
-
-      return res.status(200).json({
-        success: true,
-        data: subscription
-      });
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        error: error.message
-      });
-    }
-  }
 
   async cancelSubscription(req, res) {
     try {
-      const { hospitalId } = req.body;
-      const subscription = await subscriptionService.cancelSubscription(hospitalId);
+      const subscription = await subscriptionService.cancelSubscription(req.user.hospital_id);
 
       return res.status(200).json({
         success: true,
@@ -132,8 +145,7 @@ class SubscriptionController {
 
   async getCurrentSubscription(req, res) {
     try {
-      const { hospitalId } = req.params;
-      const subscription = await subscriptionService.getHospitalSubscription(hospitalId);
+      const subscription = await subscriptionService.getHospitalSubscription(req.user.hospital_id);
 
       if (!subscription) {
         return res.status(404).json({

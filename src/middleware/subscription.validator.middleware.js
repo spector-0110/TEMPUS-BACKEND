@@ -34,8 +34,6 @@ const validate = (schema) => {
   };
 const subscriptionValidation = {
   validateCreateSubscription: validate(subscriptionValidator.createSubscription.body),
-  validateUpdateDoctorCount: validate(subscriptionValidator.updateDoctorCount.body),
-  validateRenewSubscription: validate(subscriptionValidator.renewSubscription.body),
-  validateCancelSubscription: validate(subscriptionValidator.cancelSubscription.body)
+  validateCreateRenewSubscription: validate(subscriptionValidator.createRenewSubscription.body),
 };
 module.exports = subscriptionValidation;

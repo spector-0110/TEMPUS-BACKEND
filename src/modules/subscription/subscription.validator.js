@@ -27,38 +27,13 @@ const subscriptionValidator = {
       paymentDetails: Joi.object().required()
     })
   },
-
-  updateDoctorCount: {
+  
+  createRenewSubscription: {
     body: Joi.object({
-      hospitalId: Joi.string().required(),
-      newDoctorCount: Joi.number()
-        .integer()
-        .min(LIMITS.MIN_DOCTORS)
-        .max(LIMITS.MAX_DOCTORS)
-        .required(),
-      billingCycle: Joi.string()
-        .valid(...Object.values(BILLING_CYCLE))
-        .optional(),
-      paymentMethod: Joi.string().optional(),
-      paymentDetails: Joi.object().optional()
-    })
-  },
-
-  renewSubscription: {
-    body: Joi.object({
-      hospitalId: Joi.string().required(),
       billingCycle: Joi.string()
         .valid(...Object.values(BILLING_CYCLE))
         .required(),
-      paymentMethod: Joi.string().required(),
-      paymentDetails: Joi.object().required()
-    })
-  },
-
-  cancelSubscription: {
-    body: Joi.object({
-      hospitalId: Joi.string().required()
-    })
+    }),
   }
 };
 

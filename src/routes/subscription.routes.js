@@ -4,30 +4,31 @@ const subscriptionController = require('../modules/subscription/subscription.con
 const authMiddleware = require('../middleware/auth.middleware');
 const { 
   validateCreateSubscription,
-  validateUpdateDoctorCount,
-  validateRenewSubscription,
-  validateCancelSubscription
+  validateCreateRenewSubscription,
 } = require('../middleware/subscription.validator.middleware');
 
 // All subscription routes require authentication
 router.use(authMiddleware);
 
 // Get current subscription
-router.get('/current/:hospitalId', subscriptionController.getCurrentSubscription);
+router.get('/current', subscriptionController.getCurrentSubscription);
 
 // Get subscription history
-router.get('/history/:hospitalId', subscriptionController.getSubscriptionHistory);
+router.get('/history', subscriptionController.getSubscriptionHistory);
 
-// Create new subscription with validation
+// Create new subscription with validation not in  used as its used directly in service layer by hospital service
 router.post('/create', validateCreateSubscription, subscriptionController.createSubscription);
 
-// Update doctor count with validation
-router.put('/update-doctors-count', validateUpdateDoctorCount, subscriptionController.updateDoctorCount);
 
-// Renew subscription with validation
-router.post('/renew', validateRenewSubscription, subscriptionController.renewSubscription);
+
+// Create Renew subscription with validation
+router.post('/create-renew', validateCreateRenewSubscription, subscriptionController.createRenewSubscription);
+
+// add validation logic for razorpay payment
+router.post('/verify-renew', subscriptionController.verifySubscription);
+
 
 // Cancel subscription with validation
-router.post('/cancel', validateCancelSubscription, subscriptionController.cancelSubscription);
+router.post('/cancel', subscriptionController.cancelSubscription);
 
 module.exports = router;

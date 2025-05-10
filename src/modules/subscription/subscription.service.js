@@ -1,13 +1,17 @@
 const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const messageService = require('../notification/message.service');
+const doctorService = require('../doctor/doctor.service');
+const crypto = require('crypto');
+const  getRazorpayInstance = require('../../config/razorpay.config');
 const { 
   SUBSCRIPTION_STATUS,
   BILLING_CYCLE,
   PRICING,
   CACHE_KEYS,
   CACHE_EXPIRY,
-  LIMITS
+  LIMITS,
+  PAYMENT_STATUS
 } = require('./subscription.constants');
 
 class SubscriptionService {
@@ -32,24 +36,48 @@ class SubscriptionService {
     return Math.round(price * 100) / 100; // Round to 2 decimal places
   }
 
-  async getHospitalSubscription(hospitalId) {
+  async getHospitalSubscription(hospitalId, statusFlag = false) {
     const cacheKey = CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId;
-    let subscription = await redisService.getCache(cacheKey);
+    
+    try {
+      let subscription = await redisService.getCache(cacheKey);
 
-    if (!subscription) {
-      subscription = await prisma.hospitalSubscription.findFirst({
+      let status;
+      if (statusFlag) {
+        status = undefined;  // find any subscription regardless of status
+      } else {
+        status = SUBSCRIPTION_STATUS.ACTIVE; // only find active subscriptions
+      }
+
+      if (!subscription) {
+        subscription = await prisma.hospitalSubscription.findFirst({
+          where: { 
+            hospitalId,
+            status: status
+          }
+        });
+
+        if (subscription) {
+          // Use try-catch for cache operations to prevent cache errors from affecting main flow
+          try {
+            await redisService.setCache(cacheKey, subscription, CACHE_EXPIRY.HOSPITAL_SUBSCRIPTION);
+          } catch (error) {
+            console.error('Cache set failed:', error);
+          }
+        }
+      }
+
+      return subscription;
+    } catch (error) {
+      // If cache fails, fallback to database
+      console.error('Cache operation failed:', error);
+      return await prisma.hospitalSubscription.findFirst({
         where: { 
           hospitalId,
-          status: SUBSCRIPTION_STATUS.ACTIVE
+          status: statusFlag ? undefined : SUBSCRIPTION_STATUS.ACTIVE
         }
       });
-
-      if (subscription) {
-        await redisService.setCache(cacheKey, subscription, CACHE_EXPIRY.HOSPITAL_SUBSCRIPTION);
-      }
     }
-
-    return subscription;
   }
 
   async sendSubscriptionEmail(subscription, emailType, hospital) {
@@ -114,7 +142,7 @@ class SubscriptionService {
     });
   }
 
-  async createSubscription(tx=null,hospitalId, doctorCount, billingCycle,paymentMethod=null, paymentDetails="Trail") {
+  async createSubscription(tx=null, hospitalId, doctorCount, billingCycle, paymentMethod=null, paymentDetails="Trail") {
     if (doctorCount < LIMITS.MIN_DOCTORS || doctorCount > LIMITS.MAX_DOCTORS) {
       throw new Error(`Doctor count must be between ${LIMITS.MIN_DOCTORS} and ${LIMITS.MAX_DOCTORS}`);
     }
@@ -133,6 +161,18 @@ class SubscriptionService {
   
     const totalPrice = await this.calculatePrice(doctorCount, billingCycle);
     const run = async (db) => {
+      // Check if active subscription exists
+      const existingSubscription = await db.hospitalSubscription.findFirst({
+        where: { 
+          hospitalId,
+          status: SUBSCRIPTION_STATUS.ACTIVE
+        }
+      });
+
+      if (existingSubscription) {
+        throw new Error('Active subscription already exists');
+      }
+
       const subscription = await db.hospitalSubscription.create({
         data: {
           hospitalId,
@@ -143,8 +183,6 @@ class SubscriptionService {
           totalPrice,
           status: SUBSCRIPTION_STATUS.ACTIVE,
           autoRenew: true,
-          paymentMethod,
-          paymentDetails,
         }
       });
   
@@ -166,125 +204,110 @@ class SubscriptionService {
       const hospital = await db.hospital.findUnique({
         where: { id: hospitalId }
       });
+
+      if (!hospital) {
+        throw new Error('Hospital not found');
+      }
   
       return [subscription, hospital];
     };
   
     const [subscription, hospital] = tx ? await run(tx) : await prisma.$transaction(run);
   
-    // Send email notification
-    const messageTrackingId = await this.sendSubscriptionEmail(subscription, 'Created', hospital);
+    await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
+    
+    try {
+      await this.sendSubscriptionEmail(subscription, 'Created', hospital);
+    } catch (error) {
+      console.error('Failed to send subscription email:', error);
+    }
   
     return subscription;
   }
 
-  async updateDoctorCount(hospitalId, newDoctorCount, billingCycle, paymentMethod, paymentDetails) {
-    const subscription = await this.getHospitalSubscription(hospitalId);
-    if (!subscription) {
-      throw new Error('No active subscription found');
-    }
-
-    if (newDoctorCount < LIMITS.MIN_DOCTORS || newDoctorCount > LIMITS.MAX_DOCTORS) {
-      throw new Error(`Doctor count must be between ${LIMITS.MIN_DOCTORS} and ${LIMITS.MAX_DOCTORS}`);
-    }
-
-    const totalPrice = await this.calculatePrice(newDoctorCount, billingCycle || subscription.billingCycle);
-    const startDate = new Date();
-    const endDate = new Date();
-    
-    if (billingCycle === BILLING_CYCLE.MONTHLY) {
-      endDate.setMonth(endDate.getMonth() + 1);
-    } else {
-      endDate.setFullYear(endDate.getFullYear() + 1);
-    }
-
-    const [updatedSubscription, hospital] = await prisma.$transaction(async (tx) => {
-      const updated = await tx.hospitalSubscription.update({
-        where: { id: subscription.id },
-        data: {
-          doctorCount: newDoctorCount,
-          billingCycle: billingCycle || subscription.billingCycle,
-          startDate,
-          endDate,
-          totalPrice,
-          status: SUBSCRIPTION_STATUS.ACTIVE,
-          ...(paymentMethod && { paymentMethod, paymentDetails })
+  async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = null, paymentMethod=null, paymentDetails=null) {
+    const razorpay = getRazorpayInstance();
+  
+    // transaction to ensure ACID properties
+    return await prisma.$transaction(async (tx) => {
+  
+      const currentSub = await tx.hospitalSubscription.findFirst({
+        where: { 
+          hospitalId
         }
       });
-
-      // Create history entry
+  
+      if (!currentSub) {
+        throw new Error('No subscription found for this hospital');
+      }
+  
+      // if there's already a pending renewal
+      const pendingRenewal = await tx.subscriptionHistory.findFirst({
+        where: {
+          hospitalId,
+          subscriptionId: currentSub.id,
+          paymentStatus: PAYMENT_STATUS.PENDING
+        }
+      });
+  
+      if (pendingRenewal) {
+        throw new Error('A pending renewal already exists for this subscription');
+      }
+  
+      const doctorCount = updatedDoctorsCount || currentSub.doctorCount;
+  
+      if (doctorCount < LIMITS.MIN_DOCTORS || doctorCount > LIMITS.MAX_DOCTORS) {
+        throw new Error(`Doctor count must be between ${LIMITS.MIN_DOCTORS} and ${LIMITS.MAX_DOCTORS}`);
+      }
+  
+      const currentListedDoctors = await doctorService.listDoctors(hospitalId);
+      const currentNumberOfListedDoctors = currentListedDoctors.length;
+  
+      if (doctorCount < currentNumberOfListedDoctors) {
+        throw new Error(`Updated doctor count cannot be less than current doctor count (${currentNumberOfListedDoctors})`);
+      }
+  
+      const startDate = new Date();
+      const endDate = new Date();
+      if (billingCycle === BILLING_CYCLE.MONTHLY) {
+        endDate.setMonth(endDate.getMonth() + 1);
+      } else {
+        endDate.setFullYear(endDate.getFullYear() + 1);
+      }
+  
+      const totalPrice = await this.calculatePrice(doctorCount, billingCycle);
+      const amountInPaise = Math.round(totalPrice * 100);
+  
+      // Set timeout for Razorpay API call
+      const razorpayPromise = new Promise(async (resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Razorpay API timeout')), 30000);
+        try {
+          const order = await razorpay.orders.create({
+            amount: amountInPaise,
+            currency: "INR",
+            receipt: `receipt_${hospitalId}_${Date.now()}`,
+            payment_capture: 1
+          });
+          clearTimeout(timeout);
+          resolve(order);
+        } catch (error) {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
+  
+      const razorpayOrder = await razorpayPromise;
+  
+      // Create subscription history within the transaction
       await tx.subscriptionHistory.create({
         data: {
-          subscriptionId: subscription.id,
+          subscriptionId: currentSub.id,
           hospitalId,
-          doctorCount: newDoctorCount,
-          billingCycle: updated.billingCycle,
-          totalPrice,
-          startDate,
-          endDate,
-          paymentMethod: paymentMethod,
-          paymentDetails: paymentDetails,
-          createdAt: new Date()
-        }
-      });
-
-      const hospital = await tx.hospital.findUnique({
-        where: { id: hospitalId }
-      });
-
-      return [updated, hospital];
-    });
-
-    // Send email notification
-    const messageTrackingId=await this.sendSubscriptionEmail(updatedSubscription, 'Updated', hospital);
-
-    // Invalidate cache
-    await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
-
-    return updatedSubscription;
-  }
-
-  async renewSubscription(hospitalId, billingCycle, paymentMethod, paymentDetails) {
-    const currentSub = await this.getHospitalSubscription(hospitalId);
-    if (!currentSub) {
-      throw new Error('No active subscription found');
-    }
-
-    if (!Object.values(BILLING_CYCLE).includes(billingCycle)) {
-      throw new Error('Invalid billing cycle');
-    }
-
-    const startDate = new Date();
-    const endDate = new Date();
-    if (billingCycle === BILLING_CYCLE.MONTHLY) {
-      endDate.setMonth(endDate.getMonth() + 1);
-    } else {
-      endDate.setFullYear(endDate.getFullYear() + 1);
-    }
-
-    const totalPrice = await this.calculatePrice(currentSub.doctorCount, billingCycle);
-
-    const [renewedSubscription, hospital] = await prisma.$transaction(async (tx) => {
-      const subscription = await tx.hospitalSubscription.update({
-        where: { id: currentSub.id },
-        data: {
-          billingCycle,
-          startDate,
-          endDate,
-          totalPrice,
-          status: SUBSCRIPTION_STATUS.ACTIVE,
-          paymentMethod,
-          paymentDetails
-        }
-      });
-
-      await tx.subscriptionHistory.create({
-        data: {
-          subscriptionId: subscription.id,
-          hospitalId,
-          doctorCount: subscription.doctorCount,
+          razorpayOrderId: razorpayOrder.id,
+          doctorCount,
           billingCycle,
           totalPrice,
+          paymentStatus: PAYMENT_STATUS.PENDING,
           startDate,
           endDate,
           paymentMethod,
@@ -292,47 +315,169 @@ class SubscriptionService {
           createdAt: new Date()
         }
       });
-
-      const hospital = await tx.hospital.findUnique({
-        where: { id: hospitalId }
-      });
-
-      return [subscription, hospital];
+  
+      return razorpayOrder;
     });
-
-    // Send email notification
-    const messageTrackingId=await this.sendSubscriptionEmail(renewedSubscription, 'Renewed', hospital);
-
-    // Invalidate cache
-    await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
-
-    return renewedSubscription;
   }
 
-  async cancelSubscription(hospitalId) {
-    const subscription = await this.getHospitalSubscription(hospitalId);
-    if (!subscription) {
-      throw new Error('No active subscription found');
-    }
+  async verifyAndUpdateSubscription(hospital, hospitalId, razorpayOrderId, razorpayPaymentId, razorpaySignature) {
+  const razorpay = getRazorpayInstance();
 
-    const updatedSubscription = await this.updateSubscriptionStatus(subscription, SUBSCRIPTION_STATUS.CANCELLED);
-    
-    // Create cancellation history entry
-    await prisma.subscriptionHistory.create({
-      data: {
-        subscriptionId: subscription.id,
-        hospitalId,
-        doctorCount: subscription.doctorCount,
-        billingCycle: subscription.billingCycle,
-        totalPrice: subscription.totalPrice,
-        startDate: subscription.startDate,
-        endDate: new Date(),
-        status: SUBSCRIPTION_STATUS.CANCELLED,
-        createdAt: new Date()
+  // transaction to ensure ACID properties
+  return await prisma.$transaction(async (tx) => {
+    // Check for duplicate payment verification
+    const existingPayment = await tx.subscriptionHistory.findFirst({
+      where: {
+        razorpayOrderId,
+        paymentStatus: PAYMENT_STATUS.SUCCESS
       }
     });
 
-    return updatedSubscription;
+    if (existingPayment) {
+      throw new Error('Payment already processed');
+    }
+
+    const generatedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(razorpayOrderId + "|" + razorpayPaymentId)
+      .digest('hex');
+
+    if (generatedSignature !== razorpaySignature) {
+      throw new Error('Payment signature mismatch');
+    }
+
+    // Set timeout for Razorpay API call
+    const paymentDetailsPromise = new Promise(async (resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Razorpay API timeout')), 30000);
+      try {
+        const details = await razorpay.payments.fetch(razorpayPaymentId);
+        clearTimeout(timeout);
+        resolve(details);
+      } catch (error) {
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
+
+    const paymentDetails = await paymentDetailsPromise;
+
+    if (paymentDetails.status !== 'captured') {
+      throw new Error('Payment was not successful');
+    }
+
+    const currentSub = await tx.hospitalSubscription.findFirst({
+      where: {
+        hospitalId,
+      }
+    });
+
+    if (!currentSub) {
+      throw new Error('No subscription found for this hospital');
+    }
+
+    const subscriptionHistory = await tx.subscriptionHistory.findFirst({
+      where: {
+        hospitalId,
+        subscriptionId: currentSub.id,
+        razorpayOrderId,
+        paymentStatus: PAYMENT_STATUS.PENDING,
+      },
+    });
+
+    if (!subscriptionHistory) {
+      throw new Error('No matching subscription history found');
+    }
+
+    // Verify payment amount matches subscription amount
+    const expectedAmountInPaise = Math.round(subscriptionHistory.totalPrice * 100);
+    if (paymentDetails.amount !== expectedAmountInPaise) {
+      throw new Error('Payment amount mismatch');
+    }
+
+    // Update subscription history
+    await tx.subscriptionHistory.update({
+      where: {
+        id: subscriptionHistory.id,
+      },
+      data: {
+        paymentStatus: PAYMENT_STATUS.SUCCESS,
+        paymentDetails: paymentDetails,
+        paymentMethod: 'RAZORPAY',
+        updatedAt: new Date(),
+      },
+    });
+
+    const startDate = (currentSub.status !== SUBSCRIPTION_STATUS.ACTIVE)
+      ? subscriptionHistory.startDate
+      : currentSub.startDate;
+
+    // Update subscription within the same transaction
+    const updatedSubscription = await tx.hospitalSubscription.update({
+      where: { id: currentSub.id },
+      data: {
+        status: SUBSCRIPTION_STATUS.ACTIVE,
+        doctorCount: subscriptionHistory.doctorCount,
+        billingCycle: subscriptionHistory.billingCycle,
+        paymentStatus: PAYMENT_STATUS.SUCCESS,
+        totalPrice: subscriptionHistory.totalPrice,
+        startDate,
+        endDate: subscriptionHistory.endDate,
+      },
+    });
+
+    // Clear cache after successful update
+    await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
+
+    // Send email notification
+    await this.sendSubscriptionEmail(updatedSubscription, 'Renewed', hospital);
+
+    return {
+      success: true,
+      message: 'Subscription renewed successfully',
+    };
+  });
+
+}
+
+  async cancelSubscription(hospitalId) {
+    return await prisma.$transaction(async (tx) => {
+      const subscription = await tx.hospitalSubscription.findFirst({
+        where: { 
+          hospitalId,
+          status: SUBSCRIPTION_STATUS.ACTIVE 
+        }
+      });
+
+      if (!subscription) {
+        throw new Error('No active subscription found');
+      }
+
+      // Update subscription status within transaction
+      const updatedSubscription = await tx.hospitalSubscription.update({
+        where: { id: subscription.id },
+        data: { status: SUBSCRIPTION_STATUS.CANCELLED }
+      });
+    
+      // Create cancellation history entry within same transaction
+      await tx.subscriptionHistory.create({
+        data: {
+          subscriptionId: subscription.id,
+          hospitalId,
+          doctorCount: subscription.doctorCount,
+          billingCycle: subscription.billingCycle,
+          totalPrice: subscription.totalPrice,
+          startDate: subscription.startDate,
+          endDate: new Date(),
+          status: SUBSCRIPTION_STATUS.CANCELLED,
+          createdAt: new Date()
+        }
+      });
+
+      // Cache invalidation should happen after successful transaction
+      await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
+
+      return updatedSubscription;
+    });
   }
 
   async getSubscriptionHistory(hospitalId) {

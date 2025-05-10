@@ -16,6 +16,12 @@ enum AppointmentStatus {
   missed
 }
 
+enum  payment_status  {
+  SUCCESS
+  PENDING
+  FAILED
+};
+
 enum NotificationStatus {
   sent
   not_sent
@@ -83,10 +89,9 @@ model HospitalSubscription {
   endDate        DateTime           @map("end_date")
   totalPrice Decimal                @map("total_price")
   lastNotifiedAt DateTime?          @map("last_notified_at")
-  autoRenew      Boolean            @default(true) @map("auto_renew")
-  paymentMethod  String?            @map("payment_method")
-  paymentDetails Json?              @map("payment_details")
+  autoRenew      Boolean            @default(false) @map("auto_renew")
   status         SubscriptionStatus @default(PENDING)
+  paymentStatus  payment_status       @default(PENDING)
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
 
@@ -103,10 +108,12 @@ model SubscriptionHistory {
   id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   subscriptionId String             @map("subscription_id") @db.Uuid
   hospitalId     String             @map("hospital_id") @db.Uuid
+  razorpayOrderId String            @db.Uuid
   doctorCount    Int                @map("doctor_count")
   billingCycle   BillingCycle       @map("billing_cycle")
   totalPrice     Decimal            @map("total_price")
   startDate      DateTime           @map("start_date")
+  paymentStatus  payment_status       @default(PENDING)
   endDate        DateTime           @map("end_date")
   paymentMethod  String?            @map("payment_method")
   paymentDetails Json?              @map("payment_details")
