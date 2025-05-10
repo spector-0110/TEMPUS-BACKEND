@@ -175,41 +175,48 @@ class SubscriptionService {
 
       const subscription = await db.hospitalSubscription.create({
         data: {
-          hospitalId,
           doctorCount,
           billingCycle,
           startDate,
           endDate,
           totalPrice,
           status: SUBSCRIPTION_STATUS.ACTIVE,
+          paymentStatus: PAYMENT_STATUS.PENDING,
           autoRenew: true,
+          hospital: {
+            connect: {
+              id: hospitalId
+            }
+          },
+          history: {
+            create: {
+              doctorCount,
+              billingCycle,
+              totalPrice,
+              startDate,
+              endDate,
+              paymentMethod,
+              paymentDetails,
+              paymentStatus: PAYMENT_STATUS.PENDING,
+              hospital: {
+                connect: {
+                  id: hospitalId
+                }
+              }
+            }
+          }
+        },
+        include: {
+          history: true,
+          hospital: true
         }
       });
   
-      await db.subscriptionHistory.create({
-        data: {
-          subscriptionId: subscription.id,
-          hospitalId,
-          doctorCount,
-          billingCycle,
-          totalPrice,
-          startDate,
-          endDate,
-          paymentMethod,
-          paymentDetails,
-          createdAt: new Date()
-        }
-      });
-  
-      const hospital = await db.hospital.findUnique({
-        where: { id: hospitalId }
-      });
-
-      if (!hospital) {
+      if (!subscription.hospital) {
         throw new Error('Hospital not found');
       }
   
-      return [subscription, hospital];
+      return [subscription, subscription.hospital];
     };
   
     const [subscription, hospital] = tx ? await run(tx) : await prisma.$transaction(run);

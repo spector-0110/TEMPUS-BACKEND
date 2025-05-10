@@ -6,9 +6,8 @@ class SubscriptionController {
     // Bind methods to ensure correct 'this' context
     this.getHospitalSubscription = this.getHospitalSubscription.bind(this);
     this.getSubscriptionHistory = this.getSubscriptionHistory.bind(this);
-    this.createSubscription = this.createSubscription.bind(this);
-    this.updateDoctorCount = this.updateDoctorCount.bind(this);
-    this.renewSubscription = this.renewSubscription.bind(this);
+    this.createRenewSubscription = this.createRenewSubscription.bind(this);
+    this.verifySubscription = this.verifySubscription.bind(this);
     this.cancelSubscription = this.cancelSubscription.bind(this);
     this.getCurrentSubscription = this.getCurrentSubscription.bind(this);
   }
@@ -125,7 +124,6 @@ class SubscriptionController {
     }
 
   }
-
 
   async cancelSubscription(req, res) {
     try {

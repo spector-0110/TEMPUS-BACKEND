@@ -51,7 +51,7 @@ class DoctorService {
           hospitalId
         }
       });
-
+      
       // Create default schedules for all days
       const schedules = await Promise.all(
         Array.from({ length: 7 }, (_, i) => tx.doctorSchedule.create({
