@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const redisService = require('./src/services/redis.service');
 const rabbitmqService = require('./src/services/rabbitmq.service');
-const supabase = require('./src/config/supabase.config');
 const { testConnection, disconnect } = require('./src/services/database.service');
 const subscriptionCronService = require('./src/modules/subscription/subscription.cron');
 const subscriptionRoutes = require('./src/routes/subscription.routes');
