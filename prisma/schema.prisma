@@ -91,7 +91,7 @@ model HospitalSubscription {
   lastNotifiedAt DateTime?          @map("last_notified_at")
   autoRenew      Boolean            @default(false) @map("auto_renew")
   status         SubscriptionStatus @default(PENDING)
-  paymentStatus  SubscriptionPaymentStatus       @default(PENDING)
+  paymentStatus  SubscriptionPaymentStatus  @default(PENDING) @map("payment_status")
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
 
@@ -113,7 +113,7 @@ model SubscriptionHistory {
   billingCycle   BillingCycle       @map("billing_cycle")
   totalPrice     Decimal            @map("total_price")
   startDate      DateTime           @map("start_date")
-  paymentStatus  SubscriptionPaymentStatus       @default(PENDING)
+  paymentStatus  SubscriptionPaymentStatus  @default(PENDING) @map("payment_status")
   endDate        DateTime           @map("end_date")
   paymentMethod  String?            @map("payment_method")
   paymentDetails Json?              @map("payment_details")

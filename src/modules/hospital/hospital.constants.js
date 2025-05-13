@@ -1,12 +1,26 @@
 const ALLOWED_UPDATE_FIELDS = [
   'name',
   'address',
-  'contactInfo',
   'logo',
-  'themeColor',
   'gstin',
-  'establishedDate'
+  'establishedDate',
+  'website',
+  'contactInfo'
 ];
+
+const ALLOWED_ADDRESS_UPDATE_FIELDS = [
+  'street', 
+  'city', 
+  'district',
+  'state', 
+  'pincode', 
+  'country'
+];
+
+const ALLOWED_CONTACT_INFO=[
+  'phone',
+  'website'
+]
 
 const DEFAULT_THEME_COLOR = '#2563EB';
 
@@ -24,5 +38,7 @@ module.exports = {
   DEFAULT_THEME_COLOR,
   LICENSE_WARNING_TYPES,
   DOCTOR_LIMIT_WARNING_THRESHOLD,
-  SUBSCRIPTION_EXPIRY_WARNING_DAYS
+  SUBSCRIPTION_EXPIRY_WARNING_DAYS,
+  ALLOWED_ADDRESS_UPDATE_FIELDS,
+  ALLOWED_CONTACT_INFO
 };

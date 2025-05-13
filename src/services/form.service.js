@@ -2,9 +2,10 @@ const redisService = require('./redis.service');
 const defaultConfig = require('../config/form.config');
 
 class FormConfigService {
+
   constructor() {
     this.CACHE_KEY = 'hospital:form:config';
-    this.CACHE_EXPIRY = 24 * 60 * 60; // 24 hours
+    this.CACHE_EXPIRY = 24 * 60 * 60;
     this.initializeConfig();
   }
 
@@ -17,7 +18,6 @@ class FormConfigService {
       }
     } catch (error) {
       this.handleError('Error initializing form config', error);
-      // Don't throw on init - fallback to default config
     }
   }
 
@@ -32,27 +32,12 @@ class FormConfigService {
     }
   }
 
-  async updateConfig(newConfig) {
-    const validationResult = this.validateConfig(newConfig);
-    if (!validationResult.isValid) {
-      throw new Error(`Invalid form configuration: ${validationResult.errors.join(', ')}`);
-    }
-
+  async updateConfig(formConfig) {
     try {
-      await redisService.setCache(this.CACHE_KEY, newConfig, this.CACHE_EXPIRY);
+      await redisService.setCache(this.CACHE_KEY, formConfig, this.CACHE_EXPIRY);
       return true;
     } catch (error) {
       this.handleError('Error updating form config', error);
-      throw error;
-    }
-  }
-
-  async resetToDefault() {
-    try {
-      await this.updateConfig(defaultConfig);
-      return true;
-    } catch (error) {
-      this.handleError('Error resetting form config', error);
       throw error;
     }
   }

@@ -35,17 +35,17 @@ const defaultHospitalFormConfig = {
       title: 'Contact Information',
       fields: [
         {
-          id: 'contactInfo.phone',
+          id: 'phone',
           label: 'Phone Number',
           type: 'tel',
           required: true,
           validation: {
-            pattern: '^\\+?[\\d\\s-]{10}$', // More strict length limits
+            pattern: '^\\+?[\\d\\s-]{10}$',
             message: 'Enter a valid phone number (10 digits)'
           }
         },
         {
-          id: 'contactInfo.website',
+          id: 'website',
           label: 'Website',
           type: 'url',
           required: false,
@@ -61,7 +61,7 @@ const defaultHospitalFormConfig = {
       title: 'Address',
       fields: [
         {
-          id: 'address.street',
+          id: 'street',
           label: 'Street Address',
           type: 'text',
           required: true,
@@ -71,7 +71,7 @@ const defaultHospitalFormConfig = {
           }
         },
         {
-          id: 'address.city',
+          id: 'city',
           label: 'City',
           type: 'text',
           required: true,
@@ -82,7 +82,7 @@ const defaultHospitalFormConfig = {
           }
         },
         {
-          id: 'address.district',
+          id: 'district',
           label: 'District',
           type: 'text',
           required: true,
@@ -93,7 +93,7 @@ const defaultHospitalFormConfig = {
           }
         },
         {
-          id: 'address.state',
+          id: 'state',
           label: 'State',
           type: 'text',
           required: true,
@@ -104,7 +104,7 @@ const defaultHospitalFormConfig = {
           }
         },
         {
-          id: 'address.pincode',
+          id: 'pincode',
           label: 'PIN Code',
           type: 'text',
           required: true,

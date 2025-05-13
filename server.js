@@ -84,8 +84,11 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/doctors', doctorRoutes);
 
 // Basic route
-app.get('/', (req, res) => {
-  res.send('Hello from Express!');
+app.get('/api', (req, res) => {
+  return res.status(201).json({
+        message: 'Hello from Express!',
+        timestamp: new Date().toISOString()
+  });
 });
 
 // Initialize connections with smarter retry logic

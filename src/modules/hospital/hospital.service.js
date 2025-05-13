@@ -9,7 +9,9 @@ const {
   DEFAULT_THEME_COLOR,
   LICENSE_WARNING_TYPES,
   DOCTOR_LIMIT_WARNING_THRESHOLD,
-  SUBSCRIPTION_EXPIRY_WARNING_DAYS
+  SUBSCRIPTION_EXPIRY_WARNING_DAYS,
+  ALLOWED_ADDRESS_UPDATE_FIELDS,
+  ALLOWED_CONTACT_INFO
 } = require('./hospital.constants');
 
 class HospitalService {
@@ -54,16 +56,16 @@ class HospitalService {
           adminEmail: userEmail,
           gstin: validatedData.gstin,
           address: {
-            street: validatedData.address.street,
-            city: validatedData.address.city,
-            district: validatedData.address.district,
-            state: validatedData.address.state,
-            pincode: validatedData.address.pincode,
-            country: validatedData.address.country || 'India' // Default country
+            street: validatedData.street,
+            city: validatedData.city,
+            district: validatedData.district,
+            state: validatedData.state,
+            pincode: validatedData.pincode,
+            country: validatedData.country || 'India'
           },
           contactInfo: {
-            phone: validatedData.contactInfo.phone,
-            website: validatedData.contactInfo.website || null
+            phone: validatedData.phone,
+            website: validatedData.website || null
           },
           logo: validatedData.logo,
           themeColor: validatedData.themeColor || DEFAULT_THEME_COLOR,
@@ -158,7 +160,10 @@ class HospitalService {
       subject: 'OTP Verification for Hospital Edit',
       hospitalId: hospital.id,
       metadata: {
-        timestamp: new Date().toISOString()
+        hospitalId,
+        type: 'edit_verification_otp',
+        timestamp: new Date().toISOString(),
+        otp
       },
       content: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -171,11 +176,7 @@ class HospitalService {
           <p>This OTP will expire in 5 minutes.</p>
           <p>If you did not request this OTP, please ignore this email.</p>
         </div>
-      `,
-      metadata: {
-        hospitalId,
-        type: 'edit_verification_otp'
-      }
+      `
     });
   }
 
@@ -203,6 +204,28 @@ class HospitalService {
 
     const validatedData = validationResult.transformedData;
 
+    const hasAddress = ALLOWED_ADDRESS_UPDATE_FIELDS.some(field => validatedData[field]);
+
+    if (hasAddress) {
+      validatedData.address = {
+        street: validatedData.street,
+        city: validatedData.city,
+        district: validatedData.district,
+        state: validatedData.state,
+        pincode: validatedData.pincode,
+        country: validatedData.country || 'India'
+      };
+    }
+
+    const hasContactInfo = ALLOWED_CONTACT_INFO.some(field => validatedData[field]);
+
+    if(hasContactInfo) {  
+      validatedData.contactInfo = {
+        phone: validatedData.phone,
+        website: validatedData.website || null
+      };
+    }
+
     // Filter allowed fields and format address if present
     const sanitizedData = Object.keys(validatedData)
       .filter(key => ALLOWED_UPDATE_FIELDS.includes(key))
@@ -213,18 +236,6 @@ class HospitalService {
 
     if (Object.keys(sanitizedData).length === 0) {
       throw new Error('No valid fields to update');
-    }
-
-    // Format address if provided
-    if (sanitizedData.address) {
-      sanitizedData.address = {
-        street: sanitizedData.address.street,
-        city: sanitizedData.address.city,
-        district: sanitizedData.address.district,
-        state: sanitizedData.address.state,
-        pincode: sanitizedData.address.pincode,
-        country: sanitizedData.address.country || 'India'
-      };
     }
 
     // Update hospital details

@@ -11,7 +11,6 @@ class HospitalController {
     this.updateHospitalDetails = this.updateHospitalDetails.bind(this);
     this.getDashboardStats = this.getDashboardStats.bind(this);
     this.getFormConfig = this.getFormConfig.bind(this);
-    this.updateFormConfig = this.updateFormConfig.bind(this);
     this.resetFormConfig = this.resetFormConfig.bind(this);
   }
 
@@ -149,31 +148,6 @@ class HospitalController {
       console.error('Error fetching form config:', error);
       return res.status(500).json({ 
         error: 'Failed to fetch form configuration',
-        message: error.message 
-      });
-    }
-  }
-
-  async updateFormConfig(req, res) {
-    try {
-      const newConfig = req.body;
-      
-      if (!newConfig || !Object.keys(newConfig).length) {
-        return res.status(400).json({ 
-          error: 'Invalid request',
-          message: 'Form configuration is required' 
-        });
-      }
-
-      await formService.updateConfig(newConfig);
-      return res.json({ 
-        message: 'Form configuration updated successfully',
-        config: newConfig 
-      });
-    } catch (error) {
-      console.error('Error updating form config:', error);
-      return res.status(error.message.includes('Invalid form') ? 400 : 500).json({ 
-        error: error.message.includes('Invalid form') ? 'Validation Error' : 'Failed to update form configuration',
         message: error.message 
       });
     }

@@ -133,29 +133,29 @@ class MailService {
     }
   }
 
-  async sendOTPEmail(to, otp, hospitalId = null) {
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563EB;">Tempus OTP Verification</h2>
-        <p>Hello,</p>
-        <p>Your OTP for editing hospital details is:</p>
-        <div style="background-color: #f3f4f6; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
-          ${otp}
-        </div>
-        <p>This OTP will expire in 5 minutes.</p>
-        <p style="color: #64748b; font-size: 14px;">If you didn't request this OTP, please ignore this email.</p>
-        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-        <p style="color: #64748b; font-size: 12px;">
-          This is an automated email from Tempus. Please do not reply to this email.
-        </p>
-        <p style="color: #64748b; font-size: 10px;">
-          Sent at: ${new Date().toISOString()}
-        </p>
-      </div>
-    `;
+  // async sendOTPEmail(to, otp, hospitalId = null) {
+  //   const html = `
+  //     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  //       <h2 style="color: #2563EB;">Tempus OTP Verification</h2>
+  //       <p>Hello,</p>
+  //       <p>Your OTP for editing hospital details is:</p>
+  //       <div style="background-color: #f3f4f6; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+  //         ${otp}
+  //       </div>
+  //       <p>This OTP will expire in 5 minutes.</p>
+  //       <p style="color: #64748b; font-size: 14px;">If you didn't request this OTP, please ignore this email.</p>
+  //       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+  //       <p style="color: #64748b; font-size: 12px;">
+  //         This is an automated email from Tempus. Please do not reply to this email.
+  //       </p>
+  //       <p style="color: #64748b; font-size: 10px;">
+  //         Sent at: ${new Date().toISOString()}
+  //       </p>
+  //     </div>
+  //   `;
 
-    return this.sendMail(to, 'Hospital Edit Verification OTP', html, hospitalId);
-  }
+  //   return this.sendMail(to, 'Hospital Edit Verification OTP', html, hospitalId);
+  // }
 }
 
 module.exports = new MailService();

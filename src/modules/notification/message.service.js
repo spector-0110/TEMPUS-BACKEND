@@ -67,8 +67,8 @@ class MessageService {
   
     // OTP queue consumer with higher priority
     await setupConsumer(this.queues.otp, async (message) => {
-      const { to, otp, hospitalId } = message;
-      await mailService.sendOTPEmail(to, otp, hospitalId);
+      const { to, subject, content, hospitalId } = message;
+      await mailService.sendMail(to, subject, content, hospitalId);
     }, { maxRetries: 3, prefetch: 5, priority: 10 });
   
     // SMS queue consumer
