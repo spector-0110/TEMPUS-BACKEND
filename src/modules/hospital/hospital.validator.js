@@ -1,7 +1,7 @@
 const formService = require('../../services/form.service');
 
 class HospitalValidator {
-  async validateFormData(data) {
+  async validateFormData(data, isUpdate = false) {
     const formConfig = await formService.getConfig();
     const errors = [];
     const transformedData = {};
@@ -14,8 +14,18 @@ class HospitalValidator {
 
       console.log(`Validating field: ${field.id}, value: ${value}`);
 
-      // Skip validation for optional empty fields
-      if (!field.required && (value === undefined || value === null || value === '')) {
+      // Skip validation for fields not present in update data
+      if (isUpdate && (value === undefined || value === null)) {
+        continue;
+      }
+      
+      // Skip validation for optional empty fields during creation
+      if (!isUpdate && !field.required && (value === undefined || value === null || value === '')) {
+        continue;
+      }
+
+      // Skip validation for fields that aren't being updated
+      if (isUpdate && !Object.prototype.hasOwnProperty.call(data, field.id)) {
         continue;
       }
 

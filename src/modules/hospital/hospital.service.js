@@ -189,95 +189,97 @@ class HospitalService {
   }
 
   async updateHospitalDetails(hospitalId, updateData) {
-    // Check if user is verified for editing
-    const isVerified = await otpService.checkEditVerificationStatus(hospitalId);
-    if (!isVerified) {
-      throw new Error('OTP verification required for editing');
-    }
 
-    // Validate update data using form configuration
-    const validationResult = await hospitalValidator.validateFormData(updateData);
-    
-    if (!validationResult.isValid) {
-      throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
-    }
 
-    const validatedData = validationResult.transformedData;
-
-    const hasAddress = ALLOWED_ADDRESS_UPDATE_FIELDS.some(field => validatedData[field]);
-
-    if (hasAddress) {
-      validatedData.address = {
-        street: validatedData.street,
-        city: validatedData.city,
-        district: validatedData.district,
-        state: validatedData.state,
-        pincode: validatedData.pincode,
-        country: validatedData.country || 'India'
-      };
-    }
-
-    const hasContactInfo = ALLOWED_CONTACT_INFO.some(field => validatedData[field]);
-
-    if(hasContactInfo) {  
-      validatedData.contactInfo = {
-        phone: validatedData.phone,
-        website: validatedData.website || null
-      };
-    }
-
-    // Filter allowed fields and format address if present
-    const sanitizedData = Object.keys(validatedData)
-      .filter(key => ALLOWED_UPDATE_FIELDS.includes(key))
-      .reduce((obj, key) => {
-        obj[key] = validatedData[key];
-        return obj;
-      }, {});
-
-    if (Object.keys(sanitizedData).length === 0) {
-      throw new Error('No valid fields to update');
-    }
-
-    // Update hospital details
-    const updatedHospital = await prisma.hospital.update({
-      where: { id: hospitalId },
-      data: sanitizedData
-    });
-
-    // Invalidate edit verification status after successful update
-    await otpService.invalidateEditVerificationStatus(hospitalId);
-
-    // Define email type for welcome message
-    const emailType = 'Hospital';
-    
-    await messageService.sendMessage('email',{
-      to: updatedHospital.adminEmail,
-      subject: 'Hospital Details Updated',
-      hospitalId: updatedHospital.id,
-      metadata: {
-      emailType: `Details Update${emailType.toLowerCase()}`,
-      timestamp: new Date().toISOString()
-      },
-      content: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563EB;">Hospital Details Updated</h2>
-          <p>Dear Admin,</p>
-          <p>Your hospital "${updatedHospital.name}" details have been successfully updated in Tempus. Here are your details:</p>
-          
-          <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-            <p><strong>Hospital Name:</strong> ${updatedHospital.name}</p>
-            <p><strong>Subdomain:</strong> ${updatedHospital.subdomain}</p>
-            <p><strong>Admin Email:</strong> ${updatedHospital.adminEmail}</p>
-            ${updatedHospital.address ? `<p><strong>Address:</strong> ${updatedHospital.address}</p>` : ''}
-          </div>
-
-          <p>You can view and manage your hospital settings through the dashboard.</p>
-        </div>
-      `
-    });
-
-    return updatedHospital;
+  const pickFields=(source, fields) => {
+    return fields.reduce((result, field) => {
+      if (source[field] !== undefined) {
+        result[field] = source[field];
+      }
+      return result;
+    }, {});
   }
+  // 1. Check OTP verification
+  const isVerified = await otpService.checkEditVerificationStatus(hospitalId);
+  if (!isVerified) throw new Error('OTP verification required for editing');
+
+  // 2. Validate input data
+  const { isValid, errors, transformedData } = await hospitalValidator.validateFormData(updateData, true);
+  if (!isValid) {
+    throw Object.assign(new Error('Validation failed'), { validationErrors: errors });
+  }
+
+  // 3. Fetch existing hospital data once
+  const currentHospital = await prisma.hospital.findUnique({
+    where: { id: hospitalId },
+    select: { address: true, contactInfo: true, name: true, subdomain: true, adminEmail: true }
+  });
+
+  const updatedData = { ...transformedData };
+
+  // 4. Merge address updates if needed
+  if (ALLOWED_ADDRESS_UPDATE_FIELDS.some(field => field in updateData)) {
+    updatedData.address = {
+      ...currentHospital.address,
+      ...pickFields(transformedData, ALLOWED_ADDRESS_UPDATE_FIELDS)
+    };
+  }
+
+  // 5. Merge contact info updates if needed
+  if (ALLOWED_CONTACT_INFO.some(field => field in updateData)) {
+    updatedData.contactInfo = {
+      ...currentHospital.contactInfo,
+      ...pickFields(transformedData, ALLOWED_CONTACT_INFO)
+    };
+  }
+
+  // 6. Sanitize final update data
+  const sanitizedData = Object.fromEntries(
+    Object.entries(updatedData).filter(([key]) => ALLOWED_UPDATE_FIELDS.includes(key))
+  );
+
+  if (Object.keys(sanitizedData).length === 0) {
+    throw new Error('No valid fields to update');
+  }
+
+  // 7. Update hospital
+  const updatedHospital = await prisma.hospital.update({
+    where: { id: hospitalId },
+    data: sanitizedData
+  });
+
+  // 8. Invalidate OTP status
+  await otpService.invalidateEditVerificationStatus(hospitalId);
+
+  // 9. Send update email
+  await messageService.sendMessage('email', {
+    to: updatedHospital.adminEmail,
+    subject: 'Hospital Details Updated',
+    hospitalId: updatedHospital.id,
+    metadata: {
+      emailType: 'Details Updatehospital',
+      timestamp: new Date().toISOString()
+    },
+    content: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2563EB;">Hospital Details Updated</h2>
+        <p>Dear Admin,</p>
+        <p>Your hospital "${updatedHospital.name}" details have been successfully updated in Tempus. Here are your details:</p>
+        
+        <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+          <p><strong>Hospital Name:</strong> ${updatedHospital.name}</p>
+          <p><strong>Subdomain:</strong> ${updatedHospital.subdomain}</p>
+          <p><strong>Admin Email:</strong> ${updatedHospital.adminEmail}</p>
+          ${updatedHospital.address ? `<p><strong>Address:</strong> ${updatedHospital.address}</p>` : ''}
+        </div>
+
+        <p>You can view and manage your hospital settings through the dashboard.</p>
+      </div>
+    `
+  });
+
+  return updatedHospital;
+}
 
   async getDashboardStats(hospitalId) {
     // Try to get stats from cache first
