@@ -11,7 +11,7 @@ router.use(authMiddleware);
 router.post('/create-doctor', checkDoctorLimitMiddleware ,doctorController.createDoctor);
 router.get('/', doctorController.listDoctors);
 router.get('/:id', doctorController.getDoctorDetails);
-router.patch('/update-doctor', doctorController.updateDoctorDetails);
+router.put('/update-doctor', doctorController.updateDoctorDetails);
 router.put('/schedules', doctorController.updateDoctorSchedule);
 // add delete doctor route::
 

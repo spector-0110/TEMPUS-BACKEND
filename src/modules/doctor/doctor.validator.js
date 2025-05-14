@@ -40,8 +40,8 @@ class DoctorValidator {
       name: z.string().min(2).max(100).optional(),
       specialization: z.string().min(2).max(100).optional(),
       qualification: z.string().min(2).max(100).optional(),
-      experience: z.number().int().min(0).optional(),
-      age: z.number().int().min(20).max(100).optional(),
+      experience: z.union([z.number().int().min(0), z.string().regex(/^\d+$/).transform(Number)]).optional(),
+      age: z.union([z.number().int().min(20).max(100), z.string().regex(/^\d+$/).transform(Number)]).optional(),
     });
 
     const contactInfoSchema = z.object({

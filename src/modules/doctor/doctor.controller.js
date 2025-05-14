@@ -62,10 +62,20 @@ class DoctorController {
 
   async updateDoctorDetails(req, res) {
     try {
+      // Extract required fields from the request body
+      const { doctor_id, ...updateDoctorData } = req.body;
+      
+      if (!doctor_id) {
+        return res.status(400).json({ 
+          error: 'Validation failed',
+          validationErrors: [{ field: 'doctor_id', message: 'Doctor ID is required' }]
+        });
+      }
+      
       const updatedDoctor = await doctorService.updateDoctorDetails(
         req.user.hospital_id,
-        req.body.doctor_id,
-        req.body.updateDoctorData
+        doctor_id,
+        updateDoctorData
       );
 
       return res.json({
