@@ -161,6 +161,69 @@ class DoctorValidator {
       };
     }
   }
+  
+  validateAllSchedulesData(schedules) {
+    // Validate that we have exactly 7 days of schedules
+    if (!Array.isArray(schedules) || schedules.length !== 7) {
+      return {
+        isValid: false,
+        errors: [{
+          field: 'schedules',
+          message: 'Exactly 7 days of schedules are required'
+        }]
+      };
+    }
+    
+    // Validate each day's schedule and ensure day 0-6 (Sun-Sat) are all present
+    const dayIndices = new Set([0, 1, 2, 3, 4, 5, 6]);
+    const validatedSchedules = [];
+    const errors = [];
+    
+    schedules.forEach((schedule, index) => {
+      if (typeof schedule.dayOfWeek !== 'number' || !dayIndices.has(schedule.dayOfWeek)) {
+        errors.push({
+          field: `schedules[${index}].dayOfWeek`,
+          message: 'Day of week must be a number between 0 (Sunday) and 6 (Saturday)'
+        });
+        return;
+      }
+      
+      dayIndices.delete(schedule.dayOfWeek);
+      
+      const validationResult = this.validateScheduleData(schedule);
+      if (!validationResult.isValid) {
+        errors.push(...validationResult.errors.map(err => ({
+          field: `schedules[${index}].${err.field}`,
+          message: err.message
+        })));
+      } else {
+        validatedSchedules.push({
+          dayOfWeek: schedule.dayOfWeek,
+          ...validationResult.data
+        });
+      }
+    });
+    
+    // Check if any days are missing
+    if (dayIndices.size > 0) {
+      errors.push({
+        field: 'schedules',
+        message: `Missing schedules for days: ${Array.from(dayIndices).join(', ')}`
+      });
+    }
+    
+    if (errors.length > 0) {
+      return {
+        isValid: false,
+        errors
+      };
+    }
+    
+    return {
+      isValid: true,
+      data: validatedSchedules
+    };
+  }
 
   // Helper method to add minutes to time string
   addMinutesToTime(timeStr, minutes) {

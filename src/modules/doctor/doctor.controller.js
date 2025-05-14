@@ -96,11 +96,10 @@ class DoctorController {
 
   async updateDoctorSchedule(req, res) {
     try {
-      const schedule = await doctorService.updateDoctorSchedule(
+      const schedule = await doctorService.updateDoctorsSchedule(
         req.user.hospital_id,
-        req.params.id,
-        parseInt(req.params.dayOfWeek),
-        req.body
+        req.body.doctorId,
+        req.body.schedule,
       );
 
       return res.json({

@@ -379,7 +379,7 @@ class HospitalService {
             id: true
           }
         }),
-        // All doctor details
+        // All doctor details with their complete schedule
         prisma.doctor.findMany({
           where: { hospitalId },
           select: {

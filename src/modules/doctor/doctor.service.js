@@ -134,12 +134,14 @@ class DoctorService {
     return updatedDoctor;
   }
 
-  async updateDoctorSchedule(hospitalId, doctorId, dayOfWeek, scheduleData) {
-    // Validate schedule data
-    const validationResult = doctorValidator.validateScheduleData(scheduleData);
+  async updateDoctorsSchedule(hospitalId, doctorId, schedulesData) {
+    // Validate all schedules data
+    const validationResult = doctorValidator.validateAllSchedulesData(schedulesData);
     if (!validationResult.isValid) {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
     }
+
+    const validatedSchedules = validationResult.data;
 
     // Get doctor with minimal required fields and include hospital admin
     const doctor = await prisma.doctor.findFirst({
@@ -159,11 +161,7 @@ class DoctorService {
             adminEmail: true
           }
         },
-        schedules: {
-          where: {
-            dayOfWeek: dayOfWeek
-          }
-        }
+        schedules: true
       }
     });
 
@@ -172,37 +170,43 @@ class DoctorService {
     }
 
     // Start a transaction for schedule update
-    const { updatedSchedule } = await prisma.$transaction(async (tx) => {
-      // Update schedule
-      const schedule = await tx.doctorSchedule.upsert({
-        where: {
-          doctorId_hospitalId_dayOfWeek: {
+    const updatedSchedules = await prisma.$transaction(async (tx) => {
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const schedulePromises = validatedSchedules.map(schedule => {
+        const { dayOfWeek, ...scheduleData } = schedule;
+        
+        return tx.doctorSchedule.upsert({
+          where: {
+            doctorId_hospitalId_dayOfWeek: {
+              doctorId,
+              hospitalId,
+              dayOfWeek
+            }
+          },
+          update: {
+            timeRanges: scheduleData.timeRanges,
+            status: scheduleData.status,
+            avgConsultationTime: scheduleData.avgConsultationTime
+          },
+          create: {
             doctorId,
             hospitalId,
-            dayOfWeek
+            dayOfWeek,
+            timeRanges: scheduleData.timeRanges,
+            status: scheduleData.status,
+            avgConsultationTime: scheduleData.avgConsultationTime
           }
-        },
-        update: {
-          timeRanges: validationResult.data.timeRanges,
-          status: validationResult.data.status,
-          avgConsultationTime: validationResult.data.avgConsultationTime
-        }
+        });
       });
 
-      return { 
-        updatedSchedule: schedule
-      };
+      return await Promise.all(schedulePromises);
     });
 
-    // Send notifications
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dayName = days[dayOfWeek];
-
-    // Notify doctor about schedule update
+    // Send a single consolidated notification about all schedule updates
     await messageService.sendMessage('email', {
       to: doctor.email,
-      subject: 'Schedule Update Notification',
-      content: this.getScheduleUpdateEmailTemplate(doctor, updatedSchedule, dayName),
+      subject: 'Schedule Updates Notification',
+      content: this.getSchedulesUpdateEmailTemplate(doctor, updatedSchedules),
       hospitalId
     });
 
@@ -210,19 +214,20 @@ class DoctorService {
     if (doctor.hospital?.adminEmail) {
       await messageService.sendMessage('email', {
         to: doctor.hospital.adminEmail,
-        subject: `Doctor Schedule Update - ${doctor.name}`,
-        content: this.getAdminScheduleUpdateEmailTemplate(doctor, updatedSchedule, dayName),
+        subject: `Doctor Schedules Updated - ${doctor.name}`,
+        content: this.getAdminSchedulesUpdateEmailTemplate(doctor, updatedSchedules),
         hospitalId
       });
     }
 
     // Invalidate relevant caches
     await Promise.all([
+      redisService.invalidateCache(`hospital:dashboard:${hospitalId}`),
       redisService.invalidateCache(CACHE_KEYS.DOCTOR_SCHEDULE + doctorId),
       redisService.invalidateCache(CACHE_KEYS.DOCTOR_DETAILS + doctorId)
     ]);
 
-    return updatedSchedule;
+    return updatedSchedules;
   }
 
   async getHospitalAdminEmail(hospitalId) {
@@ -307,23 +312,55 @@ class DoctorService {
       </div>
     `;
   }
-  
-  getScheduleUpdateEmailTemplate(doctor, schedule, dayName) {
-    const timeRanges = schedule.timeRanges
-      .map(range => `${range.start} - ${range.end}`)
-      .join(', ');
 
+  getSchedulesUpdateEmailTemplate(doctor, schedules) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+    // Sort schedules by day of the week
+    const sortedSchedules = [...schedules].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+    
+    // Generate schedule rows
+    const scheduleRows = sortedSchedules.map(schedule => {
+      const dayName = days[schedule.dayOfWeek];
+      const status = schedule.status === 'ACTIVE' ? 
+        '<span style="color: #10B981;">ACTIVE</span>' : 
+        '<span style="color: #EF4444;">INACTIVE</span>';
+      
+      const timeRanges = schedule.timeRanges
+        .map(range => `${range.start} - ${range.end}`)
+        .join('<br>');
+      
+      return `
+        <tr style="${schedule.dayOfWeek % 2 === 0 ? 'background-color: #F9FAFB;' : ''}">
+          <td style="padding: 12px; border: 1px solid #e5e7eb;"><strong>${dayName}</strong></td>
+          <td style="padding: 12px; border: 1px solid #e5e7eb;">${timeRanges}</td>
+          <td style="padding: 12px; border: 1px solid #e5e7eb;">${schedule.avgConsultationTime} mins</td>
+          <td style="padding: 12px; border: 1px solid #e5e7eb;">${status}</td>
+        </tr>
+      `;
+    }).join('');
+    
     return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563EB;">Schedule Update Notification</h2>
+        <h2 style="color: #2563EB;">Schedule Updates Notification</h2>
         <p>Dear Dr. ${doctor.name},</p>
-        <p>Your schedule has been updated for ${dayName}.</p>
+        <p>Your weekly schedule has been updated. Below is your updated schedule:</p>
         
-        <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          <p><strong>Updated Schedule:</strong></p>
-          <p>Working Hours: ${timeRanges}</p>
-          <p>Status: ${schedule.status}</p>
-        </div>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <thead>
+            <tr style="background-color: #EBF5FF;">
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Day</th>
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Hours</th>
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Consultation Time</th>
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${scheduleRows}
+          </tbody>
+        </table>
+        
+        <p>If you have any questions about your schedule, please contact the hospital administration.</p>
         
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
         <p style="color: #64748b; font-size: 12px;">
@@ -332,23 +369,52 @@ class DoctorService {
       </div>
     `;
   }
-
-  // Helper method for admin schedule update email template
-  getAdminScheduleUpdateEmailTemplate(doctor, schedule, dayName) {
-    const timeRanges = schedule.timeRanges
-      .map(range => `${range.start} - ${range.end}`)
-      .join(', ');
-
+  
+  getAdminSchedulesUpdateEmailTemplate(doctor, schedules) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+    // Sort schedules by day of the week
+    const sortedSchedules = [...schedules].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+    
+    // Generate schedule rows
+    const scheduleRows = sortedSchedules.map(schedule => {
+      const dayName = days[schedule.dayOfWeek];
+      const status = schedule.status === 'ACTIVE' ? 
+        '<span style="color: #10B981;">ACTIVE</span>' : 
+        '<span style="color: #EF4444;">INACTIVE</span>';
+      
+      const timeRanges = schedule.timeRanges
+        .map(range => `${range.start} - ${range.end}`)
+        .join('<br>');
+      
+      return `
+        <tr style="${schedule.dayOfWeek % 2 === 0 ? 'background-color: #F9FAFB;' : ''}">
+          <td style="padding: 12px; border: 1px solid #e5e7eb;"><strong>${dayName}</strong></td>
+          <td style="padding: 12px; border: 1px solid #e5e7eb;">${timeRanges}</td>
+          <td style="padding: 12px; border: 1px solid #e5e7eb;">${schedule.avgConsultationTime} mins</td>
+          <td style="padding: 12px; border: 1px solid #e5e7eb;">${status}</td>
+        </tr>
+      `;
+    }).join('');
+    
     return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #2563EB;">Doctor Schedule Update</h2>
-        <p>Doctor ${doctor.name}'s schedule has been updated.</p>
+        <p>Doctor ${doctor.name}'s weekly schedule has been updated. Below is the updated schedule:</p>
         
-        <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          <p><strong>Updated Schedule for ${dayName}:</strong></p>
-          <p>Working Hours: ${timeRanges}</p>
-          <p>Status: ${schedule.status}</p>
-        </div>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <thead>
+            <tr style="background-color: #EBF5FF;">
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Day</th>
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Hours</th>
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Consultation Time</th>
+              <th style="padding: 12px; border: 1px solid #e5e7eb; text-align: left;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${scheduleRows}
+          </tbody>
+        </table>
         
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
         <p style="color: #64748b; font-size: 12px;">

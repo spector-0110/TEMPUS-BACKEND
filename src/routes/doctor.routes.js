@@ -12,7 +12,7 @@ router.post('/create-doctor', checkDoctorLimitMiddleware ,doctorController.creat
 router.get('/', doctorController.listDoctors);
 router.get('/:id', doctorController.getDoctorDetails);
 router.put('/:id', doctorController.updateDoctorDetails);
-router.put('/:id/:dayOfWeek', doctorController.updateDoctorSchedule);
+router.put('/update-doctor-schedule', doctorController.updateDoctorSchedule);
 // add delete doctor route::
 
 module.exports = router;
