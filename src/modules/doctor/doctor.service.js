@@ -71,15 +71,21 @@ class DoctorService {
   }
 
   async updateDoctorDetails(hospitalId, doctorId, updateData) {
+    
     // Try to get existing doctor from cache first
     const cacheKey = CACHE_KEYS.DOCTOR_DETAILS + doctorId;
     let existingDoctor = await redisService.getCache(cacheKey);
     
     if (!existingDoctor) {
       // If not in cache, get from database
-      existingDoctor = await prisma.doctor.findFirst({
-        where: { id: doctorId, hospitalId }
-      });
+      try {
+        existingDoctor = await prisma.doctor.findFirst({
+          where: { id: doctorId, hospitalId }
+        });
+      } catch (error) {
+        console.error('Database error fetching doctor:', error);
+        throw new Error('Invalid doctor ID');
+      }
 
       if (!existingDoctor) {
         throw new Error('Doctor not found');
@@ -148,7 +154,7 @@ class DoctorService {
       where: { 
         id: doctorId, 
         hospitalId,
-        status: 'ACTIVE'
+        status: DOCTOR_STATUS.ACTIVE
       },
       select: {
         id: true,
@@ -172,34 +178,53 @@ class DoctorService {
     // Start a transaction for schedule update
     const updatedSchedules = await prisma.$transaction(async (tx) => {
       const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const schedulePromises = validatedSchedules.map(schedule => {
+      
+      // Process schedules sequentially within transaction
+      const results = [];
+      
+      for (const schedule of validatedSchedules) {
         const { dayOfWeek, ...scheduleData } = schedule;
         
-        return tx.doctorSchedule.upsert({
+        // First check if schedule exists
+        const existingSchedule = await tx.doctorSchedule.findFirst({
           where: {
-            doctorId_hospitalId_dayOfWeek: {
-              doctorId,
-              hospitalId,
-              dayOfWeek
-            }
-          },
-          update: {
-            timeRanges: scheduleData.timeRanges,
-            status: scheduleData.status,
-            avgConsultationTime: scheduleData.avgConsultationTime
-          },
-          create: {
             doctorId,
             hospitalId,
-            dayOfWeek,
-            timeRanges: scheduleData.timeRanges,
-            status: scheduleData.status,
-            avgConsultationTime: scheduleData.avgConsultationTime
+            dayOfWeek
           }
         });
-      });
-
-      return await Promise.all(schedulePromises);
+        
+        let result;
+        if (existingSchedule) {
+          // Update existing schedule
+          result = await tx.doctorSchedule.update({
+            where: {
+              id: existingSchedule.id
+            },
+            data: {
+              timeRanges: scheduleData.timeRanges,
+              status: scheduleData.status,
+              avgConsultationTime: scheduleData.avgConsultationTime
+            }
+          });
+        } else {
+          // Create new schedule
+          result = await tx.doctorSchedule.create({
+            data: {
+              doctorId,
+              hospitalId,
+              dayOfWeek,
+              timeRanges: scheduleData.timeRanges,
+              status: scheduleData.status,
+              avgConsultationTime: scheduleData.avgConsultationTime
+            }
+          });
+        }
+        
+        results.push(result);
+      }
+      
+      return results;
     });
 
     // Send a single consolidated notification about all schedule updates

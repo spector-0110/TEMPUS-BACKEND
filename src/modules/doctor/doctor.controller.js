@@ -64,8 +64,8 @@ class DoctorController {
     try {
       const updatedDoctor = await doctorService.updateDoctorDetails(
         req.user.hospital_id,
-        req.params.id,
-        req.body
+        req.body.doctor_id,
+        req.body.updateDoctorData
       );
 
       return res.json({
@@ -96,15 +96,25 @@ class DoctorController {
 
   async updateDoctorSchedule(req, res) {
     try {
-      const schedule = await doctorService.updateDoctorsSchedule(
+      if (!req.body.doctor_id || !req.body.schedules) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          message: 'Doctor ID and schedule data are required'
+        });
+      }
+
+      console.log('Updating schedules for doctor:', req.body.doctor_id);
+      console.log('Schedule data:', JSON.stringify(req.body.schedules));
+      
+      const schedules = await doctorService.updateDoctorsSchedule(
         req.user.hospital_id,
-        req.body.doctorId,
-        req.body.schedule,
+        req.body.doctor_id,
+        req.body.schedules,
       );
 
       return res.json({
-        message: 'Schedule updated successfully',
-        schedule
+        message: 'Schedules updated successfully',
+        schedules
       });
     } catch (error) {
       console.error('Error updating doctor schedule:', error);
