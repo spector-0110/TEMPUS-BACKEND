@@ -2,22 +2,11 @@ const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const messageService = require('../notification/message.service');
 const doctorValidator = require('./doctor.validator');
-const subscriptionService = require('../subscription/subscription.service');
 const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS, DOCTOR_STATUS } = require('./doctor.constants');
 
 class DoctorService {
 
   async createDoctor(hospitalId, doctorData) {
-    // Check doctor limit from subscription
-    const subscription = await subscriptionService.getHospitalSubscription(hospitalId);
-    if (!subscription) {
-      throw new Error('No active subscription found');
-    }
-
-    const currentDoctorCount = await prisma.doctor.count({ where: { hospitalId } });
-    if (currentDoctorCount >= subscription.doctorCount) {
-      throw new Error('Doctor limit reached for current subscription');
-    }
 
     // Check if doctor with same email or phone exists in the hospital
     const existingDoctor = await prisma.doctor.findFirst({

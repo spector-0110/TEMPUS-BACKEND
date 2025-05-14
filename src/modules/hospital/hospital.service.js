@@ -319,7 +319,7 @@ class HospitalService {
         doctorsList,
         subscription,
         subscriptionHistory,
-        hospitalDetails
+        hospitalDetails,
       ] = await Promise.all([
         // Today's appointment details
         prisma.appointment.findMany({
@@ -390,10 +390,15 @@ class HospitalService {
             specialization: true,
             qualification: true,
             experience: true,
+            age: true, 
+            photo: true,
+            aadhar: true,
             status: true,
             schedules: {
               select: {
+                id: true,
                 dayOfWeek: true,
+                avgConsultationTime: true,
                 timeRanges: true,
                 status: true
               }
@@ -413,7 +418,22 @@ class HospitalService {
         // Subscription history
         prisma.subscriptionHistory.findMany({
           where: { hospitalId },
-          orderBy: { createdAt: 'desc' }
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            subscriptionId: true,
+            hospitalId: true,
+            razorpayOrderId: true,
+            doctorCount: true, 
+            billingCycle: true,
+            totalPrice: true,
+            startDate: true,
+            endDate: true,
+            paymentStatus: true,
+            paymentMethod: true,
+            paymentDetails: true,
+            createdAt: true
+          }
         }),
         // Hospital details
         prisma.hospital.findUnique({
@@ -439,6 +459,33 @@ class HospitalService {
         appointmentsByDate[dateStr].total += entry._count.id;
       });
 
+      // Process appointment payment statistics
+      const appointmentPaymentStats = {
+        paid: 0,
+        pending: 0,
+        unpaid: 0
+      };
+
+      // Count appointments by payment status for current month
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const currentMonthAppointments = await prisma.appointment.groupBy({
+        by: ['paymentStatus'],
+        where: {
+          hospitalId,
+          appointmentDate: {
+            gte: currentMonthStart,
+            lte: now
+          }
+        },
+        _count: {
+          id: true
+        }
+      });
+
+      currentMonthAppointments.forEach(entry => {
+        appointmentPaymentStats[entry.paymentStatus] = entry._count.id;
+      });
+      
       const stats = {
         hospitalInfo: hospitalDetails,
         appointments: {
@@ -446,8 +493,13 @@ class HospitalService {
             today: todayAppointments.map(apt => ({
               id: apt.id,
               patientName: apt.patientName,
+              mobile: apt.mobile,
+              age: apt.age,
               time: apt.startTime,
+              endTime: apt.endTime,
               status: apt.status,
+              paymentStatus: apt.paymentStatus,
+              notificationStatus: apt.notificationStatus,
               doctor: apt.doctor ? {
                 id: apt.doctor.id,
                 name: apt.doctor.name,
@@ -457,8 +509,13 @@ class HospitalService {
             tomorrow: tomorrowAppointments.map(apt => ({
               id: apt.id,
               patientName: apt.patientName,
+              mobile: apt.mobile,
+              age: apt.age,
               time: apt.startTime,
+              endTime: apt.endTime,
               status: apt.status,
+              paymentStatus: apt.paymentStatus,
+              notificationStatus: apt.notificationStatus,
               doctor: apt.doctor ? {
                 id: apt.doctor.id,
                 name: apt.doctor.name,
@@ -468,26 +525,35 @@ class HospitalService {
           },
           history: Object.values(appointmentsByDate).sort((a, b) => 
             new Date(a.date) - new Date(b.date)
-          )
+          ),
+          paymentStats: appointmentPaymentStats
         },
         doctors: doctorsList,
         currentSubscription: subscription ? {
           id: subscription.id,
           expiresAt: subscription.endDate,
           status: subscription.status,
+          paymentStatus: subscription.paymentStatus,
           doctorCount: subscription.doctorCount,
           billingCycle: subscription.billingCycle,
           totalPrice: subscription.totalPrice,
-          autoRenew: subscription.autoRenew
+          autoRenew: subscription.autoRenew,
+          startDate: subscription.startDate,
+          lastNotifiedAt: subscription.lastNotifiedAt
         } : null,
         subscriptionHistory: subscriptionHistory.map(sub => ({
           id: sub.id,
+          subscriptionId: sub.subscriptionId,
+          razorpayOrderId: sub.razorpayOrderId,
           startDate: sub.startDate,
           endDate: sub.endDate,
-          status: sub.status || 'ACTIVE',
+          paymentStatus: sub.paymentStatus,
           doctorCount: sub.doctorCount,
           totalPrice: sub.totalPrice,
-          billingCycle: sub.billingCycle
+          billingCycle: sub.billingCycle,
+          paymentMethod: sub.paymentMethod,
+          paymentDetails: sub.paymentDetails,
+          createdAt: sub.createdAt
         }))
       };
 
@@ -499,6 +565,7 @@ class HospitalService {
         // Continue without caching if it fails
       }
 
+      console.log('Dashboard Stats:', stats);
       return stats;
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);

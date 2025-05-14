@@ -12,7 +12,7 @@ const checkDoctorLimitMiddleware =async (req,res,next)=>{
         }
     
         // Check if the hospital has an active subscription
-    const subscription = await SubscriptionService.getHospitalSubscription(hospitalId);
+    const subscription = await SubscriptionService.getHospitalSubscription(hospitalId,true);
         if (!subscription) {
             return res.status(404).json({ error: 'No active subscription found' });
         }
