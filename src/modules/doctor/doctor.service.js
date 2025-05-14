@@ -166,8 +166,7 @@ class DoctorService {
           select: {
             adminEmail: true
           }
-        },
-        schedules: true
+        }
       }
     });
 
@@ -177,54 +176,32 @@ class DoctorService {
 
     // Start a transaction for schedule update
     const updatedSchedules = await prisma.$transaction(async (tx) => {
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      // First delete all existing schedules for this doctor
+      await tx.doctorSchedule.deleteMany({
+        where: {
+          doctorId,
+          hospitalId
+        }
+      });
       
-      // Process schedules sequentially within transaction
-      const results = [];
-      
-      for (const schedule of validatedSchedules) {
+      // Then create all new schedules
+      const createPromises = validatedSchedules.map(schedule => {
         const { dayOfWeek, ...scheduleData } = schedule;
         
-        // First check if schedule exists
-        const existingSchedule = await tx.doctorSchedule.findFirst({
-          where: {
+        return tx.doctorSchedule.create({
+          data: {
             doctorId,
             hospitalId,
-            dayOfWeek
+            dayOfWeek,
+            timeRanges: scheduleData.timeRanges,
+            status: scheduleData.status,
+            avgConsultationTime: scheduleData.avgConsultationTime
           }
         });
-        
-        let result;
-        if (existingSchedule) {
-          // Update existing schedule
-          result = await tx.doctorSchedule.update({
-            where: {
-              id: existingSchedule.id
-            },
-            data: {
-              timeRanges: scheduleData.timeRanges,
-              status: scheduleData.status,
-              avgConsultationTime: scheduleData.avgConsultationTime
-            }
-          });
-        } else {
-          // Create new schedule
-          result = await tx.doctorSchedule.create({
-            data: {
-              doctorId,
-              hospitalId,
-              dayOfWeek,
-              timeRanges: scheduleData.timeRanges,
-              status: scheduleData.status,
-              avgConsultationTime: scheduleData.avgConsultationTime
-            }
-          });
-        }
-        
-        results.push(result);
-      }
+      });
       
-      return results;
+      // Execute all create operations
+      return await Promise.all(createPromises);
     });
 
     // Send a single consolidated notification about all schedule updates
@@ -347,7 +324,7 @@ class DoctorService {
     // Generate schedule rows
     const scheduleRows = sortedSchedules.map(schedule => {
       const dayName = days[schedule.dayOfWeek];
-      const status = schedule.status === 'ACTIVE' ? 
+      const status = schedule.status === 'active' ? 
         '<span style="color: #10B981;">ACTIVE</span>' : 
         '<span style="color: #EF4444;">INACTIVE</span>';
       
@@ -404,7 +381,7 @@ class DoctorService {
     // Generate schedule rows
     const scheduleRows = sortedSchedules.map(schedule => {
       const dayName = days[schedule.dayOfWeek];
-      const status = schedule.status === 'ACTIVE' ? 
+      const status = schedule.status === 'active' ? 
         '<span style="color: #10B981;">ACTIVE</span>' : 
         '<span style="color: #EF4444;">INACTIVE</span>';
       
