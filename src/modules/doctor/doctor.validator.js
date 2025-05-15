@@ -6,14 +6,14 @@ class DoctorValidator {
   validateCreateDoctorData(data) {
     const schema = z.object({
       name: z.string().min(2).max(100),
-      specialization: z.string().min(2).max(100).optional(),
-      qualification: z.string().min(2).max(100).optional(),
-      experience: z.number().int().min(0).optional(),
-      age: z.number().int().min(20).max(100).optional(),
+      specialization: z.string().min(2).max(100),
+      qualification: z.string().min(2).max(100),
+      experience: z.number().int().min(0),
+      age: z.number().int().min(20).max(100),
       phone: z.string().regex(/^\+?[\d\s-]{8,}$/),
       email: z.string().email(),
       photo: z.string().url().optional(),
-      aadhar: z.string().optional(),
+      aadhar: z.string(),
       status: z.enum([DOCTOR_STATUS.ACTIVE, DOCTOR_STATUS.INACTIVE]).default(DOCTOR_STATUS.ACTIVE)
     });
 

@@ -2,11 +2,20 @@ const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const messageService = require('../notification/message.service');
 const doctorValidator = require('./doctor.validator');
+const subscriptionService = require('../subscription/subscription.service');
 const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS, DOCTOR_STATUS } = require('./doctor.constants');
 
 class DoctorService {
 
   async createDoctor(hospitalId, doctorData) {
+
+
+    // Validate doctor data
+    const validationResult = doctorValidator.validateCreateDoctorData(doctorData);
+    if (!validationResult.isValid) {
+      throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
+    }
+
 
     // Check if doctor with same email or phone exists in the hospital
     const existingDoctor = await prisma.doctor.findFirst({
@@ -22,12 +31,6 @@ class DoctorService {
 
     if (existingDoctor) {
       throw new Error('A doctor with this email or phone number or aadhar already exists in this hospital');
-    }
-
-    // Validate doctor data
-    const validationResult = doctorValidator.validateCreateDoctorData(doctorData);
-    if (!validationResult.isValid) {
-      throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
     }
 
     // Create doctor with default schedule
@@ -64,8 +67,11 @@ class DoctorService {
       hospitalId
     });
 
-    // Invalidate hospital's doctor list cache
-    await redisService.invalidateCache(CACHE_KEYS.DOCTOR_LIST + hospitalId);
+    await Promise.all([
+       redisService.invalidateCache(`hospital:dashboard:${hospitalId}`),
+       redisService.invalidateCache(CACHE_KEYS.DOCTOR_LIST + hospitalId),
+       redisService.invalidateCache(`hospital:dashboard:${hospitalId}`),
+    ]);
 
     return doctor;
   }
@@ -98,6 +104,20 @@ class DoctorService {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
     }
 
+    if(updateData.status===DOCTOR_STATUS.ACTIVE && existingDoctor.status===DOCTOR_STATUS.INACTIVE){
+      // Check if hospital has an active subscription
+      const subscription = await subscriptionService.getHospitalSubscription(hospitalId, false);
+      if (!subscription) {
+        throw new Error('No active subscription found');
+      }
+      
+      // Get current active doctor count for the hospital
+      const currentDoctors = await this.listDoctors(hospitalId);
+      if (currentDoctors.length >= subscription.doctorCount) {
+        throw new Error('Update the subscription to make the Doctor Status Active');
+      }
+    }
+
     // If this is a contact info update, check for duplicates
     if (validationResult.isContactUpdate) {
       const duplicateDoctor = await prisma.doctor.findFirst({
@@ -107,7 +127,7 @@ class DoctorService {
           OR: [
             { email: updateData.email },
             { phone: updateData.phone },
-            {adhar: updateData.aadhar }
+            { aadhar: updateData.aadhar }
           ].filter(Boolean) // Only include conditions for fields that are being updated
         }
       });
@@ -125,8 +145,9 @@ class DoctorService {
 
     // Invalidate caches
     await Promise.all([
-      redisService.invalidateCache(CACHE_KEYS.DOCTOR_DETAILS + doctorId),
-      await redisService.invalidateCache(CACHE_KEYS.DOCTOR_LIST + hospitalId)
+       redisService.invalidateCache(`hospital:dashboard:${hospitalId}`),
+       redisService.invalidateCache(CACHE_KEYS.DOCTOR_LIST + hospitalId),
+       redisService.invalidateCache(CACHE_KEYS.DOCTOR_DETAILS + doctorId),
     ]);
 
     // Send details change notification
@@ -274,10 +295,11 @@ class DoctorService {
       return cachedDoctors;
     }
 
-    // Get all doctors with their schedules
+    // Get all active doctors with their schedules
     const doctors = await prisma.doctor.findMany({
       where: { 
-        hospitalId 
+      hospitalId,
+      status: DOCTOR_STATUS.ACTIVE
       }
     });
 

@@ -51,8 +51,7 @@ class DoctorController {
 
       if (error.validationErrors) {
         return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
+          error: error.validationErrors
         });
       }
 
@@ -67,8 +66,7 @@ class DoctorController {
       
       if (!doctor_id) {
         return res.status(400).json({ 
-          error: 'Validation failed',
-          validationErrors: [{ field: 'doctor_id', message: 'Doctor ID is required' }]
+          error: 'Doctor ID is required' ,
         });
       }
       
@@ -95,8 +93,7 @@ class DoctorController {
 
       if (error.validationErrors) {
         return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
+          error: error.validationErrors
         });
       }
 
@@ -135,8 +132,7 @@ class DoctorController {
 
       if (error.validationErrors) {
         return res.status(400).json({
-          error: 'Validation failed',
-          validationErrors: error.validationErrors
+          error: error.validationErrors,
         });
       }
 

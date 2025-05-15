@@ -1,7 +1,6 @@
 const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const messageService = require('../notification/message.service');
-const doctorService = require('../doctor/doctor.service');
 const crypto = require('crypto');
 const  getRazorpayInstance = require('../../config/razorpay.config');
 const { 
@@ -266,7 +265,9 @@ class SubscriptionService {
       if (doctorCount < LIMITS.MIN_DOCTORS || doctorCount > LIMITS.MAX_DOCTORS) {
         throw new Error(`Doctor count must be between ${LIMITS.MIN_DOCTORS} and ${LIMITS.MAX_DOCTORS}`);
       }
-  
+      
+      // Dynamically require doctorService to avoid circular dependency
+      const doctorService = require('../doctor/doctor.service');
       const currentListedDoctors = await doctorService.listDoctors(hospitalId);
       const currentNumberOfListedDoctors = currentListedDoctors.length;
   
