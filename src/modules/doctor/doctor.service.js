@@ -104,13 +104,16 @@ class DoctorService {
       throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
     }
 
+    if(updateData.status===DOCTOR_STATUS.INACTIVE && existingDoctor.status===DOCTOR_STATUS.INACTIVE){
+      throw new Error('Doctor Status is INACTIVE');
+    }
+
     if(updateData.status===DOCTOR_STATUS.ACTIVE && existingDoctor.status===DOCTOR_STATUS.INACTIVE){
       // Check if hospital has an active subscription
       const subscription = await subscriptionService.getHospitalSubscription(hospitalId, false);
       if (!subscription) {
         throw new Error('No active subscription found');
       }
-      
       // Get current active doctor count for the hospital
       const currentDoctors = await this.listDoctors(hospitalId);
       if (currentDoctors.length >= subscription.doctorCount) {

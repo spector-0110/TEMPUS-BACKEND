@@ -87,6 +87,13 @@ class DoctorController {
         return res.status(404).json({ error: error.message });
       }
 
+      if(error.message === 'Doctor Status is INACTIVE') {  
+        return res.status(402).json({ 
+          error: error.message,
+          message: 'Doctor Status is INACTIVE' 
+        });
+      }
+
       if (error.message === 'A doctor with this email or phone number or aadhar already exists in this hospital') {
         return res.status(409).json({ error: error.message });
       }
@@ -109,9 +116,6 @@ class DoctorController {
           message: 'Doctor ID and schedule data are required'
         });
       }
-
-      console.log('Updating schedules for doctor:', req.body.doctor_id);
-      console.log('Schedule data:', JSON.stringify(req.body.schedules));
       
       const schedules = await doctorService.updateDoctorsSchedule(
         req.user.hospital_id,
