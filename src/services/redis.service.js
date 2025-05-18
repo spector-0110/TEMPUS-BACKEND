@@ -443,7 +443,22 @@ class RedisService {
   }
 
   async invalidateCache(key) {
-    return this.delete(key);
+    return this.deleteCache(key);
+  }
+
+  async deleteCache(key) {
+    let retries = 0;
+    while (retries < this.MAX_RETRIES) {
+      try {
+        const client = await this.getClient();
+        await client.del(key);
+        return true;
+      } catch (err) {
+        retries++;
+        if (retries >= this.MAX_RETRIES) throw err;
+        await new Promise(res => setTimeout(res, this.RETRY_DELAY));
+      }
+    }
   }
 
   async deleteByPattern(pattern) {

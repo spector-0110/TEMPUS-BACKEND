@@ -9,6 +9,8 @@ const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
 // const patientRoutes = require('./src/routes/patient.routes');
 const doctorRoutes = require('./src/routes/doctor.routes');
+const appointmentRoutes = require('./src/routes/appointment.route');
+const appointmentProcessor = require('./src/queue/appointmentProcessor');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -86,6 +88,7 @@ app.use('/api/hospitals', hospitalRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 // app.use('/api/patients', patientRoutes);
 app.use('/api/doctors', doctorRoutes);
+app.use('/api/appointments', appointmentRoutes);
 
 // Basic route
 app.get('/api', (req, res) => {
@@ -243,9 +246,12 @@ async function startServer() {
     await initializeServices();
     //start cron jobs
     subscriptionCronService.startCronJobs();
+    // Initialize appointment processor
+    await appointmentProcessor.initialize();
     server = app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
       console.log('✅ Subscription cron jobs started');
+      console.log('✅ Appointment processor initialized');
 
 
       // Log service configuration
