@@ -1,7 +1,5 @@
 const appointmentService = require('./appointment.service');
-const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS } = require('./appointment.constants');
 const validator = require('./appointment.validator');
-const redisService = require('../../services/redis.service');
 
 /**
  * Controller for appointment-related API endpoints
@@ -47,15 +45,9 @@ class AppointmentController {
   async getAllAppointments(req, res) {
     try {
       // Extract query params for filtering
-      const { hospitalId, doctorId, date, status } = req.query;
       
       // Get appointments with filters
-      const appointments = await appointmentService.getAllAppointments({
-        hospitalId,
-        doctorId,
-        date,
-        status
-      });
+      const appointments = await appointmentService.getAllAppointment(req,res);
       
       return res.status(200).json({
         success: true,
@@ -109,6 +101,55 @@ class AppointmentController {
       return res.status(500).json({ 
         success: false, 
         message: 'Failed to retrieve appointment', 
+        error: error.message 
+      });
+    }
+  }
+
+   /**
+   * Get all appointments with optional filtering
+   */
+  async getTodayAndTomorrowandPastWeekAppointments(req, res) {
+    try {
+      const  hospitalId  = req.user.hospital_id;
+      const appointments =await appointmentService.getTodayAndTomorrowandPastWeekAppointments(hospitalId);
+  
+      console.log('Appointments:', appointments);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Appointments retrieved successfully',
+        data: appointments
+      });
+    } catch (error) {
+      console.error('Error in getAllAppointments controller:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to retrieve appointments', 
+        error: error.message 
+      });
+    }
+  }
+   /**
+   * Get all appointments with optional filtering
+   */
+  async getAppointmentHistory(req, res) {
+    try {
+      const days = req.body?.days || 30;
+      const hospitalId = req.user.hospital_id;
+      
+      const appointments =await appointmentService.getAppointmentHistory(hospitalId, days);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Appointments History retrieved successfully',
+        data: appointments
+      });
+    } catch (error) {
+      console.error('Error in getAllAppointments controller:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to retrieve appointments', 
         error: error.message 
       });
     }

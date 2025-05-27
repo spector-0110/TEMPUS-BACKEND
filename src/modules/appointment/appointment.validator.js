@@ -46,6 +46,13 @@ const appointmentSchema = Joi.object({
   
   endTime: Joi.string().pattern(/^([01]\d|2[0-3]):([0-5]\d)$/).allow(null).messages({
     'string.pattern.base': 'End time must be in 24-hour format (HH:MM)'
+  }),
+  
+  paymentStatus: Joi.string()
+  .valid(...Object.values(APPOINTMENT_PAYMENT_STATUS))
+  .optional()
+  .messages({
+    'any.only': `Payment status must be one of: ${Object.values(APPOINTMENT_PAYMENT_STATUS).join(', ')}`
   })
 });
 

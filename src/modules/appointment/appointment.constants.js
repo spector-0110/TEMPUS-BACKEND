@@ -2,14 +2,13 @@
 // Appointment statuses matching the Prisma schema
 const APPOINTMENT_STATUS = {
   BOOKED: 'booked',
-  CANCELLED: 'cancelled', 
+  CANCELLED: 'cancelled',
   COMPLETED: 'completed',
   MISSED: 'missed'
 };
 
 // Appointment payment statuses matching the Prisma schema
 const APPOINTMENT_PAYMENT_STATUS = {
-  PENDING: 'pending',
   PAID: 'paid',
   UNPAID: 'unpaid'
 };
@@ -26,7 +25,7 @@ const CACHE = {
   DOCTOR_APPOINTMENTS_PREFIX: 'doctor_appointments:',
   HOSPITAL_APPOINTMENTS_PREFIX: 'hospital_appointments:',
   APPOINTMENT_TTL: 60 * 60, // 1 hour
-  LIST_TTL: 5 * 60 // 5 minutes
+  LIST_TTL: 60 // 1 minutes
 };
 
 // Queue names for appointment module

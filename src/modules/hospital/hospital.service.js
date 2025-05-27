@@ -296,89 +296,13 @@ class HospitalService {
       // Continue to fetch from database if cache fails
     }
 
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-    
-    // Get tomorrow's date range
-    const startOfTomorrow = new Date(startOfDay);
-    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
-    const endOfTomorrow = new Date(startOfTomorrow);
-    endOfTomorrow.setDate(endOfTomorrow.getDate() + 1);
-    
-    // Get date for 7 days ago
-    const sevenDaysAgo = new Date(startOfDay);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
     try {
       const [
-        todayAppointments,
-        tomorrowAppointments,
-        appointmentHistory,
         doctorsList,
         subscription,
         subscriptionHistory,
         hospitalDetails,
       ] = await Promise.all([
-        // Today's appointment details
-        prisma.appointment.findMany({
-          where: {
-            hospitalId,
-            appointmentDate: {
-              gte: startOfDay,
-              lt: endOfDay
-            }
-          },
-          include: {
-            doctor: {
-              select: {
-                id: true,
-                name: true,
-                specialization: true,
-              }
-            }
-          },
-          orderBy: {
-            startTime: 'asc'
-          }
-        }),
-        // Tomorrow's appointment details
-        prisma.appointment.findMany({
-          where: {
-            hospitalId,
-            appointmentDate: {
-              gte: startOfTomorrow,
-              lt: endOfTomorrow
-            }
-          },
-          include: {
-            doctor: {
-              select: {
-                id: true,
-                name: true,
-                specialization: true,
-              }
-            }
-          },
-          orderBy: {
-            startTime: 'asc'
-          }
-        }),
-        // Last 7 days appointment history
-        prisma.appointment.groupBy({
-          by: ['appointmentDate', 'status'],
-          where: {
-            hospitalId,
-            appointmentDate: {
-              gte: sevenDaysAgo,
-              lte: now
-            }
-          },
-          _count: {
-            id: true
-          }
-        }),
         // All doctor details with their complete schedule
         prisma.doctor.findMany({
           where: { hospitalId },
@@ -440,94 +364,9 @@ class HospitalService {
           where: { id: hospitalId }
         })
       ]);
-
-      // Process appointment history by date
-      const appointmentsByDate = {};
-      appointmentHistory.forEach(entry => {
-        const dateStr = entry.appointmentDate.toISOString().split('T')[0];
-        if (!appointmentsByDate[dateStr]) {
-          appointmentsByDate[dateStr] = {
-            date: entry.appointmentDate,
-            booked: 0,
-            completed: 0,
-            cancelled: 0,
-            missed: 0,
-            total: 0
-          };
-        }
-        appointmentsByDate[dateStr][entry.status.toLowerCase()] = entry._count.id;
-        appointmentsByDate[dateStr].total += entry._count.id;
-      });
-
-      // Process appointment payment statistics
-      const appointmentPaymentStats = {
-        paid: 0,
-        pending: 0,
-        unpaid: 0
-      };
-
-      // Count appointments by payment status for current month
-      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const currentMonthAppointments = await prisma.appointment.groupBy({
-        by: ['paymentStatus'],
-        where: {
-          hospitalId,
-          appointmentDate: {
-            gte: currentMonthStart,
-            lte: now
-          }
-        },
-        _count: {
-          id: true
-        }
-      });
-
-      currentMonthAppointments.forEach(entry => {
-        appointmentPaymentStats[entry.paymentStatus] = entry._count.id;
-      });
       
       const stats = {
         hospitalInfo: hospitalDetails,
-        appointments: {
-          upcoming: {
-            today: todayAppointments.map(apt => ({
-              id: apt.id,
-              patientName: apt.patientName,
-              mobile: apt.mobile,
-              age: apt.age,
-              time: apt.startTime,
-              endTime: apt.endTime,
-              status: apt.status,
-              paymentStatus: apt.paymentStatus,
-              notificationStatus: apt.notificationStatus,
-              doctor: apt.doctor ? {
-                id: apt.doctor.id,
-                name: apt.doctor.name,
-                specialization: apt.doctor.specialization
-              } : null
-            })),
-            tomorrow: tomorrowAppointments.map(apt => ({
-              id: apt.id,
-              patientName: apt.patientName,
-              mobile: apt.mobile,
-              age: apt.age,
-              time: apt.startTime,
-              endTime: apt.endTime,
-              status: apt.status,
-              paymentStatus: apt.paymentStatus,
-              notificationStatus: apt.notificationStatus,
-              doctor: apt.doctor ? {
-                id: apt.doctor.id,
-                name: apt.doctor.name,
-                specialization: apt.doctor.specialization
-              } : null
-            }))
-          },
-          history: Object.values(appointmentsByDate).sort((a, b) => 
-            new Date(a.date) - new Date(b.date)
-          ),
-          paymentStats: appointmentPaymentStats
-        },
         doctors: doctorsList,
         currentSubscription: subscription ? {
           id: subscription.id,
@@ -564,8 +403,6 @@ class HospitalService {
         console.error('Error caching dashboard stats:', error);
         // Continue without caching if it fails
       }
-
-      console.log('Dashboard Stats:', stats);
       return stats;
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);

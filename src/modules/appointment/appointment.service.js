@@ -1,4 +1,4 @@
-const prisma = require('../../services/database.service');
+const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const rabbitmqService = require('../../services/rabbitmq.service');
 const messageService = require('../notification/message.service');
@@ -26,7 +26,7 @@ class AppointmentService {
           startTime: appointmentData.startTime ? new Date(`1970-01-01T${appointmentData.startTime}:00`) : null,
           endTime: appointmentData.endTime ? new Date(`1970-01-01T${appointmentData.endTime}:00`) : null,
           status: APPOINTMENT_STATUS.BOOKED,
-          paymentStatus: APPOINTMENT_PAYMENT_STATUS.PENDING
+          paymentStatus: appointmentData.paymentStatus ? appointmentData.paymentStatus : APPOINTMENT_PAYMENT_STATUS.UNPAID,
         },
         include: {
           hospital: true,
@@ -35,7 +35,7 @@ class AppointmentService {
       });
 
       // Cache the appointment
-      await this.cacheAppointment(appointment);
+      await this.cacheAppointment(appointment,appointmentData.hospitalId);
 
       // Generate tracking link
       const trackingLink = this.generateTrackingLink(appointment.id, appointment.hospitalId, appointment.doctorId);
@@ -99,10 +99,6 @@ class AppointmentService {
    * Update an appointment's payment status
    */
   async updatePaymentStatus(appointmentId, paymentStatus) {
-    // Validate the payment status
-    if (!Object.values(APPOINTMENT_PAYMENT_STATUS).includes(paymentStatus)) {
-      throw new Error(`Invalid payment status: ${paymentStatus}`);
-    }
 
     // Update the appointment
     const appointment = await prisma.appointment.update({
@@ -388,8 +384,8 @@ class AppointmentService {
         refreshedAt: new Date().toISOString()
       };
       
-      // Cache the tracking result for 30 seconds
-      await redisService.setCache(trackingCacheKey, trackingInfo, 30);
+      // Cache the tracking result for 60 seconds
+      await redisService.setCache(trackingCacheKey, trackingInfo, 60);
       
       return trackingInfo;
     } catch (error) {
@@ -408,9 +404,13 @@ class AppointmentService {
   /**
    * Cache an appointment
    */
-  async cacheAppointment(appointment) {
+  async cacheAppointment(appointment,hospitalId) {
     const cacheKey = `${CACHE.APPOINTMENT_PREFIX}${appointment.id}`;
+
+    const cacheDelKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}today_tomorrow:${hospitalId}`;
+
     await redisService.setCache(cacheKey, appointment, CACHE.APPOINTMENT_TTL);
+    await redisService.deleteCache(cacheDelKey);
     return appointment;
   }
   
@@ -440,17 +440,17 @@ class AppointmentService {
         hospitalId: appointment.hospitalId,
         content: `Thank you for booking an appointment with ${appointment.hospital.name}!
 
-Your appointment with Dr. ${appointment.doctor.name} is confirmed for ${appointmentDate} at ${startTime}.
+          Your appointment with Dr. ${appointment.doctor.name} is confirmed for ${appointmentDate} at ${startTime}.
 
-Track your appointment queue status: ${trackingLink}
-• Check your position in the queue
-• See how many patients are ahead of you
-• Get notified when it's your turn
-• View the full day's appointment schedule
+          Track your appointment queue status: ${trackingLink}
+          • Check your position in the queue
+          • See how many patients are ahead of you
+          • Get notified when it's your turn
+          • View the full day's appointment schedule
 
-Need to reschedule or cancel? Click the tracking link above.
+          Need to reschedule or cancel? Click the tracking link above.
 
-We look forward to seeing you!`
+          We look forward to seeing you!`
         };
       
       // Send WhatsApp message
@@ -510,7 +510,7 @@ We look forward to seeing you!`
   }
   
   /**
-   * Validate if a status transition is allowed
+   * Validate if a status transition is allowed~
    */
   isValidStatusTransition(currentStatus, newStatus) {
     // Define allowed status transitions
@@ -522,7 +522,10 @@ We look forward to seeing you!`
       ],
       [APPOINTMENT_STATUS.CANCELLED]: [],
       [APPOINTMENT_STATUS.COMPLETED]: [],
-      [APPOINTMENT_STATUS.MISSED]: []
+      [APPOINTMENT_STATUS.MISSED]: [
+        APPOINTMENT_STATUS.COMPLETED,
+        APPOINTMENT_STATUS.CANCELLED
+      ]
     };
     
     // Allow transition to same status
@@ -579,6 +582,181 @@ We look forward to seeing you!`
       };
     }
   }
+
+  /**
+   * Get today's and tomorrow's appointments for a hospital
+   * @param {string} hospitalId - Hospital ID
+   * @returns {object} Object containing today's and tomorrow's appointments
+   */
+  async getTodayAndTomorrowandPastWeekAppointments(hospitalId) {
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
+      }
+
+      // Cache key for today and tomorrow appointments with 2-minute TTL
+      const cacheKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}today_tomorrow:${hospitalId}`;
+      
+      // Try to get from cache first
+      const cachedAppointments = await redisService.getCache(cacheKey);
+      if (cachedAppointments) {
+        return cachedAppointments;
+      }
+
+      // Get today's date
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Get tomorrow's date
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      // Get day after tomorrow to create proper range
+      const dayAfterTomorrow = new Date(tomorrow);
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+
+      // Fetch both today's and tomorrow's appointments in a single query
+      const allAppointments = await prisma.appointment.findMany({
+        where: {
+          hospitalId: hospitalId,
+          appointmentDate: {
+            gte: today,
+            lt: dayAfterTomorrow
+          }
+        },
+        include: {
+          doctor: {
+            select: {
+              id: true,
+              name: true,
+              specialization: true,
+              photo: true
+            }
+          }
+        },
+        orderBy: [
+          { appointmentDate: 'asc' },
+          { startTime: 'asc' }
+        ]
+      });
+
+      // Separate today's and tomorrow's appointments
+      const todayAppointments = allAppointments.filter(apt => {
+        const aptDate = new Date(apt.appointmentDate);
+        aptDate.setHours(0, 0, 0, 0);
+        return aptDate.getTime() === today.getTime();
+      });
+      
+      const tomorrowAppointments = allAppointments.filter(apt => {
+        const aptDate = new Date(apt.appointmentDate);
+        aptDate.setHours(0, 0, 0, 0);
+        return aptDate.getTime() === tomorrow.getTime();
+      });
+
+      const appointmentHistory= await this.getAppointmentHistory(hospitalId, 7);
+
+      const result = {
+        today: todayAppointments,
+        tomorrow: tomorrowAppointments,
+        history: appointmentHistory,
+        fetchedAt: new Date().toISOString()
+      };
+
+      // Cache for 2 minutes (120 seconds)
+      await redisService.setCache(cacheKey, result, 120);
+      
+      return result;
+
+    } catch (error) {
+      console.error('Error fetching today and tomorrow appointments:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get appointment history for the last 30 days for a hospital
+   * @param {string} hospitalId - Hospital ID
+   * @param {number} days - Number of days to look back (default: 30)
+   * @returns {array} Array of appointments from the last 30 days
+   */
+  async getAppointmentHistory(hospitalId, days = 30) {
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
+      }
+
+      // Cache key for appointment history
+      const cacheKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}history:${hospitalId}:${days}days`;
+      
+      // Try to get from cache first
+      const cachedHistory = await redisService.getCache(cacheKey);
+      if (cachedHistory) {
+        return cachedHistory;
+      }
+
+      // Calculate date range (last 30 days)
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() - 2); // Include today
+      endDate.setHours(23, 59, 59, 999); // End of today
+      
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      startDate.setHours(0, 0, 0, 0); // Start of the day 30 days ago
+
+      // Fetch appointment history
+      const appointmentHistory = await prisma.appointment.findMany({
+        where: {
+          hospitalId: hospitalId,
+          appointmentDate: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        include: {
+          doctor: {
+            select: {
+              id: true,
+              name: true,
+              specialization: true,
+              photo: true
+            }
+          }
+        },
+        orderBy: [
+          { appointmentDate: 'desc' },
+          { startTime: 'desc' }
+        ]
+      });
+
+      // Group appointments by status for summary
+      const statusSummary = appointmentHistory.reduce((acc, appointment) => {
+        acc[appointment.status] = (acc[appointment.status] || 0) + 1;
+        return acc;
+      }, {});
+
+      const result = {
+        appointments: appointmentHistory,
+        summary: {
+          total: appointmentHistory.length,
+          dateRange: {
+            from: startDate.toISOString(),
+            to: endDate.toISOString()
+          },
+          statusBreakdown: statusSummary
+        },
+        fetchedAt: new Date().toISOString()
+      };
+
+      // Cache for 5 minutes for history data
+      await redisService.setCache(cacheKey, result, 600);
+
+      return result;
+    } catch (error) {
+      console.error('Error fetching appointment history:', error);
+      throw error;
+    }
+  }
+  
 }
 
 module.exports = new AppointmentService();

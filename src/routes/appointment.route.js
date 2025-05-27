@@ -12,7 +12,9 @@ router.post('/', appointmentController.createAppointment);
 router.delete('/:id', appointmentController.deleteAppointment);
 
 // Protected endpoints - require authentication
-router.get('/', authMiddleware, appointmentController.getAllAppointments);
+router.get('/', authMiddleware, appointmentController.getTodayAndTomorrowandPastWeekAppointments);
+router.get('/history', authMiddleware, appointmentController.getAppointmentHistory);
+
 router.get('/:id', authMiddleware, appointmentController.getAppointmentById);
 router.patch('/:id/status', authMiddleware, appointmentController.updateAppointmentStatus);
 router.patch('/:id/payment', authMiddleware, appointmentController.updatePaymentStatus);
