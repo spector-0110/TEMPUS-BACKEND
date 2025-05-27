@@ -324,8 +324,8 @@ class AppointmentService {
           ]
         });
         
-        // Cache for just 30 seconds to ensure fresh data but prevent hammering database
-        await redisService.setCache(queueCacheKey, todayAppointments, 30);
+        // Cache for 300  seconds to ensure fresh data but prevent hammering database
+        await redisService.setCache(queueCacheKey, todayAppointments, 300);
       }
       
       // Find current appointment position in queue
@@ -392,13 +392,6 @@ class AppointmentService {
       console.error('Error decoding tracking token:', error);
       throw new Error('Invalid or expired tracking token');
     }
-  }
-  
-  /**
-   * Verify a tracking token and return the decoded data
-   */
-  verifyTrackingToken(token) {
-    return trackingUtil.verifyToken(token);
   }
   
   /**

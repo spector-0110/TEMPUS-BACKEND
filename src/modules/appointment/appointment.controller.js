@@ -383,7 +383,6 @@ class AppointmentController {
       }
 
       // First, invalidate any cached tracking data for this token
-      const { appointmentId, hospitalId, doctorId } = appointmentService.verifyTrackingToken(req.params.token);
       await appointmentService.invalidateTrackingCaches(hospitalId, doctorId);
       
       // Get fresh appointment and queue information
