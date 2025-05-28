@@ -873,7 +873,7 @@ class AppointmentService {
       const dayAfterTomorrow = new Date(tomorrow);
       dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
       
-      
+      console.log("schedules---------------------------->", schedules);
       
       const todaySchedule = schedules.find(s => s.dayOfWeek === today.getDay());
       const tomorrowSchedule = schedules.find(s => s.dayOfWeek === tomorrow.getDay());
@@ -900,6 +900,14 @@ class AppointmentService {
           status: true
         }
       });
+
+
+      console.log("existingAppointments---------------------------->", existingAppointments);
+
+      console.log("todaySchedule-------", todaySchedule);
+      console.log("tomorrowSchedule-------", tomorrowSchedule);
+      console.log("today---------------------------->", today);
+      console.log("tomorrow---------------------------->", tomorrow);
 
       const todaySlots = todaySchedule ? this.generateAvailableSlots(todaySchedule, today, existingAppointments) : [];
       const tomorrowSlots = tomorrowSchedule ? this.generateAvailableSlots(tomorrowSchedule, tomorrow, existingAppointments) : [];
@@ -954,7 +962,10 @@ class AppointmentService {
     // Filter existing appointments for this date
     const dayAppointments = existingAppointments.filter(apt => {
       const aptDate = new Date(apt.appointmentDate);
-      return aptDate.toDateString() === date.toDateString();
+      aptDate.setHours(0, 0, 0, 0); // Normalize to start of day
+      const filterDate = new Date(date);
+      filterDate.setHours(0, 0, 0, 0); // Normalize to start of day
+      return aptDate.getTime() === filterDate.getTime();
     });
 
     // Convert existing appointments to occupied time slots
@@ -1027,7 +1038,7 @@ class AppointmentService {
           start: slotStart,
           end: slotEnd,
           available: isAvailable,
-          date: date.toISOString().split('T')[0],
+          date: date.toLocaleDateString('en-CA'),
           timeDisplay: this.formatTimeDisplay(slotStart, slotEnd)
         };
 
