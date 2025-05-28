@@ -6,6 +6,7 @@ const router = express.Router();
 // Public endpoints
 router.get('/track/:token', appointmentController.trackAppointment);
 router.get('/refresh-queue/:token', appointmentController.refreshQueueStatus); // For real-time queue updates
+router.get('/details/:subdomain', appointmentController.getHospitalDetailsBySubdomainForAppointment);
 
 // Patient endpoints - no auth required for patient to create/manage their own appointments
 router.post('/', appointmentController.createAppointment);

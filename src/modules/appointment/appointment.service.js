@@ -3,7 +3,7 @@ const redisService = require('../../services/redis.service');
 const rabbitmqService = require('../../services/rabbitmq.service');
 const messageService = require('../notification/message.service');
 const trackingUtil = require('../../utils/tracking.util');
-const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS, CACHE, QUEUES } = require('./appointment.constants');
+const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS, CACHE, QUEUES ,APPOINTMENT_PAYMENT_METHOD} = require('./appointment.constants');
 
 /**
  * Service layer for appointment-related operations
@@ -27,6 +27,7 @@ class AppointmentService {
           endTime: appointmentData.endTime ? new Date(`1970-01-01T${appointmentData.endTime}:00`) : null,
           status: APPOINTMENT_STATUS.BOOKED,
           paymentStatus: appointmentData.paymentStatus ? appointmentData.paymentStatus : APPOINTMENT_PAYMENT_STATUS.UNPAID,
+          paymentMethod: appointmentData.paymentMethod ? appointmentData.paymentMethod : null,
         },
         include: {
           hospital: true,
@@ -96,14 +97,18 @@ class AppointmentService {
   }
   
   /**
-   * Update an appointment's payment status
+   * Update an appointment's payment status and method
    */
-  async updatePaymentStatus(appointmentId, paymentStatus) {
+  async updatePaymentStatus(appointmentId, paymentStatus, paymentMethod) {
+    
+    const updateData = {};
+    if (paymentStatus) updateData.paymentStatus = paymentStatus;
+    if (paymentMethod) updateData.paymentMethod = paymentMethod;
 
     // Update the appointment
     const appointment = await prisma.appointment.update({
       where: { id: appointmentId },
-      data: { paymentStatus },
+      data: updateData,
       include: {
         hospital: true,
         doctor: true
@@ -604,6 +609,7 @@ class AppointmentService {
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
       
+      
       // Get day after tomorrow to create proper range
       const dayAfterTomorrow = new Date(tomorrow);
       dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
@@ -750,6 +756,330 @@ class AppointmentService {
     }
   }
   
+  /**
+   * Get hospital details by subdomain for appointment booking
+   * @param {string} subdomain - Hospital subdomain
+   * @returns {object} Hospital details with available doctors and schedules
+   */
+  async getHospitalDetailsBySubdomainForAppointment(subdomain) {
+
+    try {
+      // Cache key for hospital public details
+      const cacheKey = `hospital:public:${subdomain}`;
+      
+      // Try to get from cache first
+      const cachedDetails = await redisService.getCache(cacheKey);
+      if (cachedDetails) {
+        return cachedDetails;
+      }
+
+      // Get hospital by subdomain
+      const hospital = await prisma.hospital.findUnique({
+        where: { subdomain: subdomain },
+        select: {
+          id: true,
+          name: true,
+          logo: true,
+          address: true,
+          contactInfo: true
+        }
+      });
+
+      if (!hospital) {
+        throw new Error('Hospital not found');
+      }
+
+      // Get active doctors with their schedules for the next 2 days
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      const activeDoctors = await prisma.doctor.findMany({
+        where: {
+          hospitalId: hospital.id,
+          status: 'active'
+        },
+        select: {
+          id: true,
+          name: true,
+          specialization: true,
+          qualification: true,
+          experience: true,
+          photo: true,
+          schedules: {
+            where: {
+              status: 'active',
+              dayOfWeek: {
+                in: [today.getDay(), tomorrow.getDay()]
+              }
+            },
+            select: {
+              id: true,
+              dayOfWeek: true,
+              timeRanges: true,
+              avgConsultationTime: true,
+              status: true
+            }
+          }
+        }
+      });
+
+      // Calculate available slots for each doctor for today and tomorrow
+      const doctorsWithAvailability = await Promise.all(
+        activeDoctors.map(async (doctor) => {
+          const availability = await this.calculateDoctorAvailability(hospital.id, doctor.id, doctor.schedules);
+          return {
+            ...doctor,
+            availability
+          };
+        })
+      );
+
+      const result = {
+        hospital: {
+          id: hospital.id,
+          name: hospital.name,
+          logo: hospital.logo,
+          themeColor: hospital.themeColor || '#2563EB',
+          address: hospital.address,
+          contactInfo: hospital.contactInfo
+        },
+        doctors: doctorsWithAvailability,
+        fetchedAt: new Date().toISOString()
+      };
+
+      // Cache for 5 minutes
+      await redisService.setCache(cacheKey, result, 300);
+      
+      return result;
+    } catch (error) {
+      console.error('Error fetching hospital details by subdomain:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate doctor availability for today and tomorrow
+   * @param {string} hospitalId - Hospital ID
+   * @param {string} doctorId - Doctor ID
+   * @param {array} schedules - Doctor schedules
+   * @returns {object} Availability object with today and tomorrow slots
+   */
+  async calculateDoctorAvailability(hospitalId, doctorId, schedules) {
+    try {
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dayAfterTomorrow = new Date(tomorrow);
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      
+      
+      
+      const todaySchedule = schedules.find(s => s.dayOfWeek === today.getDay());
+      const tomorrowSchedule = schedules.find(s => s.dayOfWeek === tomorrow.getDay());
+
+      // Get existing appointments for today and tomorrow
+      // Only consider 'booked' and 'completed' appointments as occupied slots
+      // 'cancelled' and 'missed' appointments free up the slots
+      const existingAppointments = await prisma.appointment.findMany({
+        where: {
+          hospitalId,
+          doctorId,
+          appointmentDate: {
+            gte: today,
+            lt: dayAfterTomorrow
+          },
+          status: {
+            in: [APPOINTMENT_STATUS.BOOKED] // Only these statuses block slots
+          }
+        },
+        select: {
+          appointmentDate: true,
+          startTime: true,
+          endTime: true,
+          status: true
+        }
+      });
+
+      const todaySlots = todaySchedule ? this.generateAvailableSlots(todaySchedule, today, existingAppointments) : [];
+      const tomorrowSlots = tomorrowSchedule ? this.generateAvailableSlots(tomorrowSchedule, tomorrow, existingAppointments) : [];
+
+      // Calculate summary statistics
+      const todayAvailable = todaySlots.filter(slot => slot.available).length;
+      const tomorrowAvailable = tomorrowSlots.filter(slot => slot.available).length;
+
+      return {
+        today: {
+          slots: todaySlots,
+          totalSlots: todaySlots.length,
+          availableSlots: todayAvailable,
+          occupiedSlots: todaySlots.length - todayAvailable,
+          date: today.toISOString().split('T')[0],
+          dayName: today.toLocaleDateString('en-IN', { weekday: 'long' })
+        },
+        tomorrow: {
+          slots: tomorrowSlots,
+          totalSlots: tomorrowSlots.length,
+          availableSlots: tomorrowAvailable,
+          occupiedSlots: tomorrowSlots.length - tomorrowAvailable,
+          date: tomorrow.toISOString().split('T')[0],
+          dayName: tomorrow.toLocaleDateString('en-IN', { weekday: 'long' })
+        },
+        summary: {
+          totalAvailableSlots: todayAvailable + tomorrowAvailable,
+          hasAvailability: (todayAvailable + tomorrowAvailable) > 0
+        }
+      };
+    } catch (error) {
+      console.error('Error calculating doctor availability:', error);
+      return { 
+        today: { slots: [], totalSlots: 0, availableSlots: 0, occupiedSlots: 0 }, 
+        tomorrow: { slots: [], totalSlots: 0, availableSlots: 0, occupiedSlots: 0 },
+        summary: { totalAvailableSlots: 0, hasAvailability: false }
+      };
+    }
+  }
+
+  /**
+   * Generate available time slots for a doctor on a specific date
+   * @param {object} schedule - Doctor schedule for the day
+   * @param {Date} date - Date for which to generate slots
+   * @param {array} existingAppointments - Existing appointments (only booked/completed)
+   * @returns {array} Array of time slots with availability status
+   */
+  generateAvailableSlots(schedule, date, existingAppointments) {
+    const slots = [];
+    const consultationTime = schedule.avgConsultationTime || 5; // Default 5 minutes
+    
+    // Filter existing appointments for this date
+    const dayAppointments = existingAppointments.filter(apt => {
+      const aptDate = new Date(apt.appointmentDate);
+      return aptDate.toDateString() === date.toDateString();
+    });
+
+    // Convert existing appointments to occupied time slots
+    const occupiedSlots = dayAppointments.map(apt => {
+      const startTime = apt.startTime ? new Date(apt.startTime) : null;
+      if (!startTime) return null;
+      
+      return {
+        start: `${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`,
+        end: apt.endTime ? 
+          (() => {
+            const endTime = new Date(apt.endTime);
+            return `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
+          })() :
+          this.addMinutesToTime(`${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`, consultationTime),
+        status: apt.status
+      };
+    }).filter(slot => slot !== null);
+
+    // Generate slots for each time range in the schedule
+    schedule.timeRanges.forEach(range => {
+      const startHour = parseInt(range.start.split(':')[0]);
+      const startMinute = parseInt(range.start.split(':')[1]);
+      const endHour = parseInt(range.end.split(':')[0]);
+      const endMinute = parseInt(range.end.split(':')[1]);
+
+      let currentTime = new Date(date);
+      currentTime.setHours(startHour, startMinute, 0, 0);
+      
+      const endTime = new Date(date);
+      endTime.setHours(endHour, endMinute, 0, 0);
+
+      // Skip past slots for today
+      const now = new Date();
+      if (date.toDateString() === now.toDateString() && currentTime <= now) {
+        // Round up to next available slot
+        const minutesToAdd = consultationTime - (now.getMinutes() % consultationTime);
+        currentTime = new Date(now.getTime() + minutesToAdd * 60000);
+        currentTime.setSeconds(0, 0);
+        
+        // If the rounded time is past the schedule end time, skip this range
+        if (currentTime >= endTime) {
+          return;
+        }
+      }
+
+      // Generate all slots within the time range
+      while (currentTime < endTime) {
+        const slotStart = `${String(currentTime.getHours()).padStart(2, '0')}:${String(currentTime.getMinutes()).padStart(2, '0')}`;
+        const slotEndTime = new Date(currentTime.getTime() + consultationTime * 60000);
+        
+        // Skip if slot extends beyond schedule end time
+        if (slotEndTime > endTime) {
+          break;
+        }
+        
+        const slotEnd = `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
+
+        // Check if slot is occupied by booked or completed appointments
+        const occupiedSlot = occupiedSlots.find(occupied => {
+          return (slotStart >= occupied.start && slotStart < occupied.end) ||
+                 (slotEnd > occupied.start && slotEnd <= occupied.end) ||
+                 (slotStart <= occupied.start && slotEnd >= occupied.end);
+        });
+
+        const isAvailable = !occupiedSlot;
+        
+        // Create slot object with detailed information
+        const slot = {
+          start: slotStart,
+          end: slotEnd,
+          available: isAvailable,
+          date: date.toISOString().split('T')[0],
+          timeDisplay: this.formatTimeDisplay(slotStart, slotEnd)
+        };
+
+        // Add reason if slot is not available
+        if (!isAvailable) {
+          slot.reason = occupiedSlot.status === 'booked' ? 'Already booked' : 'Appointment completed';
+          slot.blockedBy = occupiedSlot.status;
+        }
+
+        slots.push(slot);
+        currentTime.setMinutes(currentTime.getMinutes() + consultationTime);
+      }
+    });
+
+    return slots;
+  }
+
+  /**
+   * Format time display for user-friendly presentation
+   * @param {string} startTime - Start time in HH:MM format
+   * @param {string} endTime - End time in HH:MM format
+   * @returns {string} Formatted time display
+   */
+  formatTimeDisplay(startTime, endTime) {
+    const formatTime = (time) => {
+      const [hours, minutes] = time.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes);
+      return date.toLocaleTimeString('en-IN', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        hour12: true 
+      });
+    };
+
+    return `${formatTime(startTime)} - ${formatTime(endTime)}`;
+  }
+
+  /**
+   * Helper method to add minutes to time string
+   * @param {string} timeStr - Time in HH:MM format
+   * @param {number} minutes - Minutes to add
+   * @returns {string} New time in HH:MM format
+   */
+  addMinutesToTime(timeStr, minutes) {
+    const [hours, mins] = timeStr.split(':').map(Number);
+    const date = new Date();
+    date.setHours(hours, mins);
+    date.setMinutes(date.getMinutes() + minutes);
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+
 }
 
 module.exports = new AppointmentService();

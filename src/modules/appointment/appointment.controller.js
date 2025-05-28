@@ -234,7 +234,6 @@ class AppointmentController {
       if (error) {
         return res.status(400).json({ 
           success: false, 
-          message: 'Invalid payment status',
           errors: error.details.map(detail => detail.message)
         });
       }
@@ -242,12 +241,13 @@ class AppointmentController {
       // Update payment status
       const updatedAppointment = await appointmentService.updatePaymentStatus(
         req.params.id, 
-        value.paymentStatus
+        value.paymentStatus,
+        value.paymentMethod
       );
       
       return res.status(200).json({
         success: true,
-        message: 'Payment status updated successfully',
+        message: 'Payment updated successfully',
         data: updatedAppointment
       });
     } catch (error) {
@@ -418,6 +418,44 @@ class AppointmentController {
       });
     }
   }
+
+
+  async getHospitalDetailsBySubdomainForAppointment(req, res) { 
+    try {
+      const { subdomain } = req.params;
+      
+      if (!subdomain) {
+        return res.status(400).json({
+          success: false,
+          message: 'Subdomain is required'
+        });
+      }
+
+      const hospitalDetails = await appointmentService.getHospitalDetailsBySubdomainForAppointment(subdomain);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Hospital details retrieved successfully',
+        data: hospitalDetails
+      });
+    } catch (error) {
+      console.error('Error getting hospital details by subdomain:', error);
+      
+      if (error.message === 'Hospital not found') {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found with this subdomain'
+        });
+      }
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve hospital details',
+        error: error.message
+      });
+    }
+   }
 }
+
 
 module.exports = new AppointmentController();

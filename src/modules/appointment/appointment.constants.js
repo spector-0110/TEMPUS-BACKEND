@@ -13,6 +13,12 @@ const APPOINTMENT_PAYMENT_STATUS = {
   UNPAID: 'unpaid'
 };
 
+const APPOINTMENT_PAYMENT_METHOD = {
+  CASH: 'cash',
+  UPI: 'upi',
+  CARD: 'card'
+};
+
 // Notification statuses
 const NOTIFICATION_STATUS = {
   SENT: 'sent',
@@ -37,7 +43,7 @@ const QUEUES = {
 
 // Tracking link configuration
 const TRACKING_LINK = {
-  TOKEN_EXPIRY: '7d', // JWT expiry for tracking links
+  TOKEN_EXPIRY: '3d', // JWT expiry for tracking links
   ALGORITHM: 'HS256' // JWT algorithm
 };
 
@@ -47,5 +53,6 @@ module.exports = {
   NOTIFICATION_STATUS,
   CACHE,
   QUEUES,
-  TRACKING_LINK
+  TRACKING_LINK,
+  APPOINTMENT_PAYMENT_METHOD
 };

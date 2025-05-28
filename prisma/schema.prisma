@@ -55,6 +55,12 @@ enum DoctorStatus {
   inactive
 }
 
+enum AppointmentPaymentMethod{
+  cash
+  upi
+  card
+}
+
 model Hospital {
   id                  String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   supabaseUserId      String?                @unique @map("supabase_user_id") @db.Uuid
@@ -184,7 +190,8 @@ model Appointment {
   endTime            DateTime?          @map("end_time") @db.Time
   status             AppointmentStatus  @default(booked)
   notificationStatus NotificationStatus @default(not_sent) @map("notification_status")
-  paymentStatus      AppointmentPaymentStatus      @default(pending) @map("appointment_payment_status")
+  paymentStatus      AppointmentPaymentStatus    @map("appointment_payment_status")
+  paymentMethod      AppointmentPaymentMethod?    @map("appointment_payemnt_method")
   createdAt          DateTime           @default(now()) @map("created_at")
 
   // Relations

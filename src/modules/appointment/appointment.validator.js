@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS } = require('./appointment.constants');
+const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS ,APPOINTMENT_PAYMENT_METHOD} = require('./appointment.constants');
 
 // Base appointment validation schema
 const appointmentSchema = Joi.object({
@@ -53,7 +53,15 @@ const appointmentSchema = Joi.object({
   .optional()
   .messages({
     'any.only': `Payment status must be one of: ${Object.values(APPOINTMENT_PAYMENT_STATUS).join(', ')}`
-  })
+  }),
+
+  paymentMethod: Joi.string()
+  .valid(...Object.values(APPOINTMENT_PAYMENT_METHOD))
+  .optional()
+  .messages({
+    'any.only': `Payment method must be one of: ${Object.values(APPOINTMENT_PAYMENT_METHOD).join(', ')}`
+  }),
+
 });
 
 // Schema for updating appointment status
@@ -75,6 +83,13 @@ const paymentStatusSchema = Joi.object({
     .messages({
       'any.only': `Payment status must be one of: ${Object.values(APPOINTMENT_PAYMENT_STATUS).join(', ')}`,
       'any.required': 'Payment status is required'
+    }),
+  paymentMethod: Joi.string()
+    .valid(...Object.values(APPOINTMENT_PAYMENT_METHOD))
+    .required()
+    .messages({
+      'any.only': `Payment method must be one of: ${Object.values(APPOINTMENT_PAYMENT_METHOD).join(', ')}`,
+      'any.required': 'Payment method is required'
     })
 });
 
