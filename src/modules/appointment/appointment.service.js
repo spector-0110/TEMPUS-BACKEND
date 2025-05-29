@@ -898,9 +898,7 @@ class AppointmentService {
       tomorrow.setDate(tomorrow.getDate() + 1);
       const dayAfterTomorrow = new Date(tomorrow);
       dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
-      
-      console.log("schedules---------------------------->", schedules);
-      
+            
       const todaySchedule = schedules.find(s => s.dayOfWeek === today.getDay());
       const tomorrowSchedule = schedules.find(s => s.dayOfWeek === tomorrow.getDay());
 
@@ -927,13 +925,6 @@ class AppointmentService {
         }
       });
 
-
-      console.log("existingAppointments---------------------------->", existingAppointments);
-
-      console.log("todaySchedule-------", todaySchedule);
-      console.log("tomorrowSchedule-------", tomorrowSchedule);
-      console.log("today---------------------------->", today);
-      console.log("tomorrow---------------------------->", tomorrow);
 
       const todaySlots = todaySchedule ? this.generateAvailableSlots(todaySchedule, today, existingAppointments) : [];
       const tomorrowSlots = tomorrowSchedule ? this.generateAvailableSlots(tomorrowSchedule, tomorrow, existingAppointments) : [];

@@ -26,8 +26,6 @@ class HospitalService {
 
     const validatedData = validationResult.transformedData;
 
-    console.log('Validated Data:', validatedData);
-
 
     if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
       throw new Error('Hospital already exists for this user');

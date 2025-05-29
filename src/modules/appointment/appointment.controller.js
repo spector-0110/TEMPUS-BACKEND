@@ -114,7 +114,6 @@ class AppointmentController {
       const  hospitalId  = req.user.hospital_id;
       const appointments =await appointmentService.getTodayAndTomorrowandPastWeekAppointments(hospitalId);
   
-      console.log('Appointments:', appointments);
       
       return res.status(200).json({
         success: true,
