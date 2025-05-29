@@ -47,7 +47,33 @@ class AppointmentService {
       // Send notification
       await this.sendAppointmentNotification(appointment, trackingLink);
       
-      return { ...appointment, trackingLink };
+      // Return only essential information for user-facing appointment creation
+      return {
+        id: appointment.id,
+        patientName: appointment.patientName,
+        mobile: appointment.mobile,
+        age: appointment.age,
+        appointmentDate: appointment.appointmentDate,
+        startTime: appointment.startTime,
+        endTime: appointment.endTime,
+        status: appointment.status,
+        paymentStatus: appointment.paymentStatus,
+        hospital: {
+          name: appointment.hospital.name,
+          logo: appointment.hospital.logo,
+          address: appointment.hospital.address,
+          contactInfo: appointment.hospital.contactInfo,
+        },
+        doctor: {
+          name: appointment.doctor.name,
+          specialization: appointment.doctor.specialization,
+          qualification: appointment.doctor.qualification,
+          experience: appointment.doctor.experience,
+          age: appointment.doctor.age,
+          photo: appointment.doctor.photo
+        },
+        trackingLink
+      };
     } catch (error) {
       console.error('Error creating appointment:', error);
       throw error;
