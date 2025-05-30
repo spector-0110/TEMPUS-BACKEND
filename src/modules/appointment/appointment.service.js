@@ -3,6 +3,7 @@ const redisService = require('../../services/redis.service');
 const rabbitmqService = require('../../services/rabbitmq.service');
 const messageService = require('../notification/message.service');
 const trackingUtil = require('../../utils/tracking.util');
+const TimezoneUtil = require('../../utils/timezone.util');
 const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS, CACHE, QUEUES ,APPOINTMENT_PAYMENT_METHOD} = require('./appointment.constants');
 
 /**
@@ -307,8 +308,9 @@ class AppointmentService {
       const { appointmentId, hospitalId, doctorId } = trackingUtil.verifyToken(token);
       
       // Check if we have cached queue data (short TTL for freshness)
-      const today = new Date().toISOString().split('T')[0];
-      const trackingCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${today}:${appointmentId}`;
+      const todayIST = TimezoneUtil.getTodayIST();
+      const todayStr = TimezoneUtil.formatDateIST(todayIST, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
+      const trackingCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${todayStr}:${appointmentId}`;
       
       if (!skipCache) {
         const cachedTracking = await redisService.getCache(trackingCacheKey);
@@ -325,12 +327,11 @@ class AppointmentService {
         throw new Error(`Appointment not found: ${appointmentId}`);
       }
       
-      // Get today's appointments for the same doctor to build the queue
-      const todayDate = new Date();
-      todayDate.setHours(0, 0, 0, 0);
+      // Get today's appointments for the same doctor to build the queue using IST
+      const todayDate = TimezoneUtil.getTodayIST();
       
       // Use a short cache for today's appointments
-      const queueCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${today}`;
+      const queueCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${todayStr}`;
       let todayAppointments = await redisService.getCache(queueCacheKey);
       
       if (!todayAppointments) {
@@ -627,18 +628,14 @@ class AppointmentService {
         return cachedAppointments;
       }
 
-      // Get today's date
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // Get today's date in IST
+      const today = TimezoneUtil.getTodayIST();
       
-      // Get tomorrow's date
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      
+      // Get tomorrow's date in IST
+      const tomorrow = TimezoneUtil.getTomorrowIST();
       
       // Get day after tomorrow to create proper range
-      const dayAfterTomorrow = new Date(tomorrow);
-      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      const dayAfterTomorrow = TimezoneUtil.getDatePlusDaysIST(2);
 
       // Fetch both today's and tomorrow's appointments in a single query
       const allAppointments = await prisma.appointment.findMany({
@@ -719,14 +716,14 @@ class AppointmentService {
         return cachedHistory;
       }
 
-      // Calculate date range (last 30 days)
-      const endDate = new Date();
+      // Calculate date range in IST (last N days)
+      const endDate = TimezoneUtil.getCurrentDateIST();
       endDate.setDate(endDate.getDate() - 2); // Include today
       endDate.setHours(23, 59, 59, 999); // End of today
       
-      const startDate = new Date();
+      const startDate = TimezoneUtil.getCurrentDateIST();
       startDate.setDate(startDate.getDate() - days);
-      startDate.setHours(0, 0, 0, 0); // Start of the day 30 days ago
+      startDate.setHours(0, 0, 0, 0); // Start of the day N days ago
 
       // Fetch appointment history
       const appointmentHistory = await prisma.appointment.findMany({
@@ -815,10 +812,9 @@ class AppointmentService {
         throw new Error('Hospital not found');
       }
 
-      // Get active doctors with their schedules for the next 2 days
-      const today = new Date();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Get active doctors with their schedules for the next 2 days in IST
+      const today = TimezoneUtil.getCurrentDateIST();
+      const tomorrow = TimezoneUtil.getTomorrowIST();
       
       const activeDoctors = await prisma.doctor.findMany({
         where: {
@@ -836,7 +832,7 @@ class AppointmentService {
             where: {
               status: 'active',
               dayOfWeek: {
-                in: [today.getDay(), tomorrow.getDay()]
+                in: [TimezoneUtil.getDayOfWeekIST(today), TimezoneUtil.getDayOfWeekIST(tomorrow)]
               }
             },
             select: {
@@ -893,14 +889,12 @@ class AppointmentService {
    */
   async calculateDoctorAvailability(hospitalId, doctorId, schedules) {
     try {
-      const today = new Date();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const dayAfterTomorrow = new Date(tomorrow);
-      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      const today = TimezoneUtil.getCurrentDateIST();
+      const tomorrow = TimezoneUtil.getTomorrowIST();
+      const dayAfterTomorrow = TimezoneUtil.getDatePlusDaysIST(2);
             
-      const todaySchedule = schedules.find(s => s.dayOfWeek === today.getDay());
-      const tomorrowSchedule = schedules.find(s => s.dayOfWeek === tomorrow.getDay());
+      const todaySchedule = schedules.find(s => s.dayOfWeek === TimezoneUtil.getDayOfWeekIST(today));
+      const tomorrowSchedule = schedules.find(s => s.dayOfWeek === TimezoneUtil.getDayOfWeekIST(tomorrow));
 
       // Get existing appointments for today and tomorrow
       // Only consider 'booked' and 'completed' appointments as occupied slots
@@ -939,16 +933,16 @@ class AppointmentService {
           totalSlots: todaySlots.length,
           availableSlots: todayAvailable,
           occupiedSlots: todaySlots.length - todayAvailable,
-          date: today.toISOString().split('T')[0],
-          dayName: today.toLocaleDateString('en-IN', { weekday: 'long' })
+          date: TimezoneUtil.formatDateIST(today, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'),
+          dayName: TimezoneUtil.formatDateIST(today, { weekday: 'long' })
         },
         tomorrow: {
           slots: tomorrowSlots,
           totalSlots: tomorrowSlots.length,
           availableSlots: tomorrowAvailable,
           occupiedSlots: tomorrowSlots.length - tomorrowAvailable,
-          date: tomorrow.toISOString().split('T')[0],
-          dayName: tomorrow.toLocaleDateString('en-IN', { weekday: 'long' })
+          date: TimezoneUtil.formatDateIST(tomorrow, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'),
+          dayName: TimezoneUtil.formatDateIST(tomorrow, { weekday: 'long' })
         },
         summary: {
           totalAvailableSlots: todayAvailable + tomorrowAvailable,
@@ -1015,12 +1009,12 @@ class AppointmentService {
       const endTime = new Date(date);
       endTime.setHours(endHour, endMinute, 0, 0);
 
-      // Skip past slots for today
-      const now = new Date();
-      if (date.toDateString() === now.toDateString() && currentTime <= now) {
+      // Skip past slots for today using IST
+      const nowIST = TimezoneUtil.getCurrentDateIST();
+      if (TimezoneUtil.isTodayIST(date) && currentTime <= nowIST) {
         // Round up to next available slot
-        const minutesToAdd = consultationTime - (now.getMinutes() % consultationTime);
-        currentTime = new Date(now.getTime() + minutesToAdd * 60000);
+        const minutesToAdd = consultationTime - (nowIST.getMinutes() % consultationTime);
+        currentTime = new Date(nowIST.getTime() + minutesToAdd * 60000);
         currentTime.setSeconds(0, 0);
         
         // If the rounded time is past the schedule end time, skip this range
@@ -1055,7 +1049,7 @@ class AppointmentService {
           start: slotStart,
           end: slotEnd,
           available: isAvailable,
-          date: date.toLocaleDateString('en-CA'),
+          date: TimezoneUtil.formatDateIST(date, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'),
           timeDisplay: this.formatTimeDisplay(slotStart, slotEnd)
         };
 
