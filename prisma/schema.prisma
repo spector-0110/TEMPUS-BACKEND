@@ -186,8 +186,8 @@ model Appointment {
   mobile             String
   age                Int?
   appointmentDate    DateTime           @map("appointment_date") @db.Date
-  startTime          DateTime?          @map("start_time") @db.Time
-  endTime            DateTime?          @map("end_time") @db.Time
+  startTime          DateTime?          @map("start_time") @db.Timestamptz
+  endTime            DateTime?          @map("end_time") @db.Timestamptz
   status             AppointmentStatus  @default(booked)
   notificationStatus NotificationStatus @default(not_sent) @map("notification_status")
   paymentStatus      AppointmentPaymentStatus    @map("appointment_payment_status")

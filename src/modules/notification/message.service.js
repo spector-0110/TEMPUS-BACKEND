@@ -1,6 +1,7 @@
 const redisService = require('../../services/redis.service');
 const rabbitmqService = require('../../services/rabbitmq.service');
 const mailService = require('../../services/mail.service');
+const watsappService = require('../../services/whatsapp.service');
 
 const MESSAGE_TYPE = {
   EMAIL: 'email',
@@ -74,6 +75,9 @@ class MessageService {
     // SMS queue consumer
     await setupConsumer(this.queues.sms, async (message) => {
       // SMS implementation
+      // For example, using a third-party SMS service   
+      
+      
       console.log('Processing SMS:', message);
     }, { maxRetries: 3, prefetch: 10 });
   
@@ -81,6 +85,9 @@ class MessageService {
     await setupConsumer(this.queues.whatsapp, async (message) => {
       // WhatsApp implementation
       console.log('Processing WhatsApp:', message);
+      watsappService.sendChatMessage(message.to, message.content);
+
+      
     }, { maxRetries: 3, prefetch: 10 });
   }
 

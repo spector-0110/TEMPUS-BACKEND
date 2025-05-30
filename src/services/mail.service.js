@@ -113,7 +113,7 @@ class MailService {
         messageId: info.messageId,
         timestamp: new Date().toISOString(),
         hospitalId
-      }, 7 * 24 * 60 * 60); // 7 days retention
+      },  24 * 60 * 60); // 1 days retention
 
       return true;
     } catch (error) {
@@ -126,7 +126,7 @@ class MailService {
         stack: error.stack,
         timestamp: new Date().toISOString(),
         hospitalId
-      }, 7 * 24 * 60 * 60);
+      }, 24 * 60 * 60);
 
       console.error('Error sending email:', error);
       throw error;

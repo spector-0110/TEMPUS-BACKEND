@@ -1,7 +1,8 @@
 const rabbitmqService = require('../services/rabbitmq.service');
 const redisService = require('../services/redis.service');
 const messageService = require('../modules/notification/message.service');
-const { QUEUES, APPOINTMENT_STATUS } = require('../modules/appointment/appointment.constants');
+const TimezoneUtil = require('../utils/timezone.util');
+const { QUEUES, APPOINTMENT_STATUS,APPOINTMENT_PAYMENT_STATUS } = require('../modules/appointment/appointment.constants');
 
 class AppointmentProcessor {
   constructor() {
@@ -12,11 +13,6 @@ class AppointmentProcessor {
     if (this.initialized) return;
     
     try {
-      // Create existing queue for backward compatibility
-      await rabbitmqService.createQueue('appointment_updates', {
-        deadLetterExchange: true,
-        maxLength: 100000
-      });
       
       // Create new queues with dead letter exchanges
       await rabbitmqService.createQueue(QUEUES.APPOINTMENT_CREATED, {
@@ -78,8 +74,8 @@ class AppointmentProcessor {
       try {
         console.log('Processing appointment creation:', message.appointment.id);
         
-        // Handle appointment creation event
-        // This is where additional business logic could be added
+        // Send welcome notification with tracking link
+        await this.sendAppointmentCreationNotification(message.appointment, message.trackingLink);
         
         // Invalidate any relevant cached lists
         await this.invalidateAppointmentCaches(message.appointment);
@@ -141,19 +137,22 @@ class AppointmentProcessor {
       } else if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
         notificationContent = `Thank you for visiting ${appointment.hospital.name}. Your appointment with Dr. ${appointment.doctor.name} has been marked as completed.`;
         
-        // Notify next patient in queue if there is one
-        await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+        // Optional Notify next patient in queue if there is one
+        // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+
       } else if (appointment.status === APPOINTMENT_STATUS.MISSED) {
         notificationContent = `You missed your appointment with Dr. ${appointment.doctor.name} at ${appointment.hospital.name} on ${new Date(appointment.appointmentDate).toLocaleDateString()}.`;
         
-        // Notify next patient in queue if there is one
-        await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+        // Optional Notify next patient in queue if there is one
+        // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+
       }
       
       if (notificationContent) {
         // Queue notification
         await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
           appointmentId: appointment.id,
+          name: appointment.patientName,
           mobile: appointment.mobile,
           hospitalId: appointment.hospitalId,
           content: notificationContent
@@ -161,30 +160,8 @@ class AppointmentProcessor {
       }
       
       // Clear any tracking caches to ensure data is fresh
-      await this.invalidateTrackingCaches(appointment.hospitalId, appointment.doctorId);
     } catch (error) {
       console.error('Error handling status change:', error);
-    }
-  }
-  
-  /**
-   * Invalidate tracking caches to ensure queue data is fresh
-   */
-  async invalidateTrackingCaches(hospitalId, doctorId) {
-    try {
-      // Clear any doctor/hospital specific caches
-      const today = new Date().toISOString().split('T')[0];
-      const cachePatterns = [
-        `tracking:hospital:${hospitalId}:*`,
-        `tracking:doctor:${doctorId}:*`,
-        `tracking:queue:${hospitalId}:${doctorId}:${today}*`
-      ];
-      
-      for (const pattern of cachePatterns) {
-        await redisService.deleteByPattern(pattern);
-      }
-    } catch (error) {
-      console.error('Error invalidating tracking caches:', error);
     }
   }
   
@@ -241,12 +218,13 @@ class AppointmentProcessor {
   async handlePaymentStatusChange(appointment) {
     try {
       // Generate notification if needed
-      if (appointment.paymentStatus === 'paid') {
+      if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID) {
         const notificationContent = `Payment received for your appointment with Dr. ${appointment.doctor.name} at ${appointment.hospital.name}. Thank you!`;
         
         // Queue notification
         await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
           appointmentId: appointment.id,
+          name: appointment.patientName,
           mobile: appointment.mobile,
           hospitalId: appointment.hospitalId,
           content: notificationContent
@@ -258,19 +236,15 @@ class AppointmentProcessor {
   }
 
   async handleAppointmentDeletion(appointment) {
-    try {
-      // Clear any relevant appointment-specific caches
-      await redisService.deleteCache(`appointment:${appointment.id}`);
-      
-      // Invalidate related list caches
-      await this.invalidateAppointmentCaches(appointment);
-      
+    try {      
+
       // Send cancellation notification
       const notificationContent = `Your appointment with Dr. ${appointment.doctor.name} on ${new Date(appointment.appointmentDate).toLocaleDateString()} has been cancelled.`;
       
       // Queue notification
       await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
         appointmentId: appointment.id,
+        name: appointment.patientName,
         mobile: appointment.mobile,
         hospitalId: appointment.hospitalId,
         content: notificationContent
@@ -296,6 +270,49 @@ class AppointmentProcessor {
     }
   }
 
+  async sendAppointmentCreationNotification(appointment, trackingLink) {
+    try {
+      // Format appointment date and time for the message using IST
+      const appointmentDate = TimezoneUtil.formatDateIST(appointment.appointmentDate, { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      
+      const startTime = appointment.startTime 
+        ? TimezoneUtil.formatTimeIST(appointment.startTime, { hour: '2-digit', minute: '2-digit', hour12: true })
+        : 'N/A';
+      
+      // Construct the WhatsApp message
+      const notificationContent = `Thank you for booking an appointment with ${appointment.hospital.name}!
+
+        Your appointment with Dr. ${appointment.doctor.name} is confirmed for ${appointmentDate} at ${startTime}.
+
+        Track your appointment queue status: ${trackingLink}
+        • Check your position in the queue
+        • See how many patients are ahead of you
+        • Get notified when it's your turn
+        • View the full day's appointment schedule
+
+        Need to reschedule or cancel? Click the tracking link above.
+
+        We look forward to seeing you!`;
+      
+      // Send WhatsApp message
+      await messageService.sendMessage('whatsapp', {
+        to: appointment.mobile,
+        hospitalId: appointment.hospitalId,
+        content: notificationContent
+      });
+      
+      console.log(`Appointment creation notification sent to ${appointment.mobile} for appointment ${appointment.id}`);
+    } catch (error) {
+      console.error('Error sending appointment creation notification:', error);
+      // Don't throw - notification failure shouldn't break appointment creation processing
+    }
+  }
+
   async sendNotification(message) {
     try {
       // Send WhatsApp notification
@@ -309,80 +326,6 @@ class AppointmentProcessor {
     }
   }
   
-  generateDoctorEmailContent(doctor, appointmentsByDate, reason) {
-    let appointmentsList = '';
-    Object.entries(appointmentsByDate).forEach(([date, appointments]) => {
-      appointmentsList += `
-        <div style="margin-bottom: 20px;">
-          <h3 style="color: #4B5563;">${date}</h3>
-          ${appointments.map(apt => `
-            <div style="margin-left: 20px;">
-              <p><strong>Patient:</strong> ${apt.patientName}</p>
-              <p><strong>Time:</strong> ${new Date(apt.scheduledTime).toLocaleTimeString()}</p>
-              <p><strong>Duration:</strong> ${apt.duration} minutes</p>
-            </div>
-          `).join('')}
-        </div>
-      `;
-    });
-
-    return `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563EB;">Schedule Change Notification</h2>
-        <p>Dear Dr. ${doctor.name},</p>
-        <p>Due to ${reason}, the following appointments have been affected:</p>
-        
-        <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          ${appointmentsList}
-        </div>
-
-        <p>Hospital administration has been notified and will handle the rescheduling process.</p>
-        
-        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-        <p style="color: #64748b; font-size: 12px;">
-          This is an automated email from Tempus. Please do not reply to this email.
-        </p>
-      </div>
-    `;
-  }
-
-  generateAdminEmailContent(doctor, appointmentsByDate, reason) {
-    let appointmentsList = '';
-    Object.entries(appointmentsByDate).forEach(([date, appointments]) => {
-      appointmentsList += `
-        <div style="margin-bottom: 20px;">
-          <h3 style="color: #4B5563;">${date}</h3>
-          ${appointments.map(apt => `
-            <div style="margin-left: 20px;">
-              <p><strong>Patient:</strong> ${apt.patientName}</p>
-              <p><strong>Contact:</strong> ${apt.patientPhone || 'N/A'}</p>
-              <p><strong>Time:</strong> ${new Date(apt.scheduledTime).toLocaleTimeString()}</p>
-              <p><strong>Duration:</strong> ${apt.duration} minutes</p>
-            </div>
-          `).join('')}
-        </div>
-      `;
-    });
-
-    return `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563EB;">Doctor Schedule Change - Action Required</h2>
-        <p>Schedule changes have been made for Dr. ${doctor.name} due to ${reason}.</p>
-        <p>The following appointments need to be rescheduled:</p>
-        
-        <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          ${appointmentsList}
-        </div>
-
-        <p>Please contact the affected patients to reschedule their appointments.</p>
-        
-        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-        <p style="color: #64748b; font-size: 12px;">
-          This is an automated email from Tempus.
-        </p>
-      </div>
-    `;
-  }
 }
 
 module.exports = new AppointmentProcessor();

@@ -40,13 +40,13 @@ class AppointmentService {
       await this.cacheAppointment(appointment,appointmentData.hospitalId);
 
       // Generate tracking link
-      const trackingLink = this.generateTrackingLink(appointment.id, appointment.hospitalId, appointment.doctorId);
+      const trackingLink = trackingUtil.generateTrackingLink(appointment.id, appointment.hospitalId, appointment.doctorId);
       
-      // Publish to the appointment created queue
-      await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_CREATED, { appointment });
-      
-      // Send notification
-      await this.sendAppointmentNotification(appointment, trackingLink);
+      // Publish to the appointment created queue with tracking link for notification
+      await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_CREATED, { 
+        appointment,
+        trackingLink
+      });
       
       // Return only essential information for user-facing appointment creation
       return {
@@ -85,10 +85,6 @@ class AppointmentService {
    * Update an appointment's status
    */
   async updateAppointmentStatus(appointmentId, status) {
-    // Validate the status transition
-    if (!Object.values(APPOINTMENT_STATUS).includes(status)) {
-      throw new Error(`Invalid appointment status: ${status}`);
-    }
     
     // Get current appointment
     const currentAppointment = await this.getAppointmentById(appointmentId);
@@ -432,12 +428,20 @@ class AppointmentService {
   async cacheAppointment(appointment,hospitalId) {
     const cacheKey = `${CACHE.APPOINTMENT_PREFIX}${appointment.id}`;
 
-    const cacheDelKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}today_tomorrow:${hospitalId}`;
-
+    // Cache the individual appointment
     await redisService.setCache(cacheKey, appointment, CACHE.APPOINTMENT_TTL);
-    await redisService.deleteCache(cacheDelKey);
+    
+    // Invalidate all related caches when appointment data changes
+    await this.invalidateAppointmentRelatedCaches(
+      hospitalId || appointment.hospitalId, 
+      appointment.doctorId, 
+      appointment.id
+    );
+    
     return appointment;
   }
+
+
   
   /**
    * Generate a tracking link for an appointment
@@ -874,8 +878,10 @@ class AppointmentService {
         fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
       };
 
-      // Cache for 5 minutes
-      await redisService.setCache(cacheKey, result, 300);
+      console.log('Debug: Final result structure:', JSON.stringify(result, null, 2));
+
+      // Cache for 1 minute (temporarily disabled for debugging)
+      // await redisService.setCache(cacheKey, result, 60);
       
       return result;
     } catch (error) {
