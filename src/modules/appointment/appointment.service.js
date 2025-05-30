@@ -432,11 +432,6 @@ class AppointmentService {
     await redisService.setCache(cacheKey, appointment, CACHE.APPOINTMENT_TTL);
     
     // Invalidate all related caches when appointment data changes
-    await this.invalidateAppointmentRelatedCaches(
-      hospitalId || appointment.hospitalId, 
-      appointment.doctorId, 
-      appointment.id
-    );
     
     return appointment;
   }
