@@ -274,9 +274,9 @@ class AppointmentService {
     // Get appointment first to ensure it exists and for notifications
     const appointment = await this.getAppointmentById(appointmentId);
     
-    // Only allow deletion if appointment is booked and not in the past
+    // Only allow deletion if appointment is booked and not in the past (using IST)
     if (appointment.status !== APPOINTMENT_STATUS.BOOKED || 
-        new Date(appointment.appointmentDate) < new Date()) {
+        new Date(appointment.appointmentDate) < TimezoneUtil.getTodayIST()) {
       throw new Error('Cannot delete appointment that is not in booked status or is in the past');
     }
     
@@ -367,7 +367,7 @@ class AppointmentService {
       
       const queueInfo = todayAppointments.map((apt, index) => {
         const formattedTime = apt.startTime
-          ? new Date(apt.startTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+          ? TimezoneUtil.formatTimeIST(apt.startTime, { hour: '2-digit', minute: '2-digit', hour12: true })
           : 'Not specified';
           
         if (apt.id === appointmentId) {
@@ -413,7 +413,7 @@ class AppointmentService {
           totalAppointmentsToday: todayAppointments.length,
           appointments: queueInfo
         },
-        refreshedAt: new Date().toISOString()
+        refreshedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
       };
       
       // Cache the tracking result for 60 seconds
@@ -451,12 +451,16 @@ class AppointmentService {
    */
   async sendAppointmentNotification(appointment, trackingLink) {
     try {
-      // Format appointment date and time for the message
-      const appointmentDate = new Date(appointment.appointmentDate)
-        .toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      // Format appointment date and time for the message using IST
+      const appointmentDate = TimezoneUtil.formatDateIST(appointment.appointmentDate, { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
       
       const startTime = appointment.startTime 
-        ? new Date(appointment.startTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+        ? TimezoneUtil.formatTimeIST(appointment.startTime, { hour: '2-digit', minute: '2-digit', hour12: true })
         : 'N/A';
       
       // Construct the WhatsApp message
@@ -520,10 +524,10 @@ class AppointmentService {
    */
   async invalidateTrackingCaches(hospitalId, doctorId) {
     try {
-      // Clear any doctor/hospital specific caches
-      const today = new Date().toISOString().split('T')[0];
+      // Clear any doctor/hospital specific caches using IST
+      const todayIST = TimezoneUtil.formatDateIST(TimezoneUtil.getCurrentDateIST(), { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
       const cachePatterns = [
-        `tracking:queue:${hospitalId}:${doctorId}:${today}*`
+        `tracking:queue:${hospitalId}:${doctorId}:${todayIST}*`
       ];
       
       for (const pattern of cachePatterns) {
@@ -574,13 +578,13 @@ class AppointmentService {
       // Default consultation time (15 minutes) if doctor's schedule not found
       let avgConsultationTime = 15;
       
-      // Get doctor's schedule to find consultation time
+      // Get doctor's schedule to find consultation time using IST day of week
       const doctorSchedule = await prisma.doctorSchedule.findFirst({
         where: {
           doctorId: doctorId,
           hospitalId: hospitalId,
           status: 'active',
-          dayOfWeek: new Date().getDay() // Today's day of week
+          dayOfWeek: TimezoneUtil.getCurrentDayOfWeekIST() // Today's day of week in IST
         }
       });
       
@@ -681,7 +685,7 @@ class AppointmentService {
         today: todayAppointments,
         tomorrow: tomorrowAppointments,
         history: appointmentHistory,
-        fetchedAt: new Date().toISOString()
+        fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
       };
 
       // Cache for 2 minutes (120 seconds)
@@ -766,7 +770,7 @@ class AppointmentService {
           },
           statusBreakdown: statusSummary
         },
-        fetchedAt: new Date().toISOString()
+        fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
       };
 
       // Cache for 5 minutes for history data
@@ -867,7 +871,7 @@ class AppointmentService {
           contactInfo: hospital.contactInfo
         },
         doctors: doctorsWithAvailability,
-        fetchedAt: new Date().toISOString()
+        fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
       };
 
       // Cache for 5 minutes
@@ -1033,6 +1037,18 @@ class AppointmentService {
           break;
         }
         
+        // For today's slots, skip if the slot time has already passed
+        if (TimezoneUtil.isTodayIST(date)) {
+          const nowIST = TimezoneUtil.getCurrentDateIST();
+          const slotDateTime = TimezoneUtil.createDateWithTimeIST(date, slotStart);
+          
+          // Skip slots that have already passed (with a 5-minute buffer)
+          if (slotDateTime.getTime() <= nowIST.getTime() + (5 * 60 * 1000)) {
+            currentTime.setMinutes(currentTime.getMinutes() + consultationTime);
+            continue;
+          }
+        }
+        
         const slotEnd = `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
 
         // Check if slot is occupied by booked or completed appointments
@@ -1076,9 +1092,9 @@ class AppointmentService {
   formatTimeDisplay(startTime, endTime) {
     const formatTime = (time) => {
       const [hours, minutes] = time.split(':').map(Number);
-      const date = new Date();
+      const date = TimezoneUtil.getCurrentDateIST();
       date.setHours(hours, minutes);
-      return date.toLocaleTimeString('en-IN', { 
+      return TimezoneUtil.formatTimeIST(date, { 
         hour: '2-digit', 
         minute: '2-digit', 
         hour12: true 
@@ -1096,7 +1112,7 @@ class AppointmentService {
    */
   addMinutesToTime(timeStr, minutes) {
     const [hours, mins] = timeStr.split(':').map(Number);
-    const date = new Date();
+    const date = TimezoneUtil.getCurrentDateIST();
     date.setHours(hours, mins);
     date.setMinutes(date.getMinutes() + minutes);
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
