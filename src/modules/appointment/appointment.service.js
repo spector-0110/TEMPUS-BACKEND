@@ -272,7 +272,7 @@ class AppointmentService {
     
     // Only allow deletion if appointment is booked and not in the past (using IST)
     if (appointment.status !== APPOINTMENT_STATUS.BOOKED || 
-        new Date(appointment.appointmentDate) < TimezoneUtil.getTodayIST()) {
+        new Date(appointment.appointmentDate) < TimezoneUtil.getCurrentIst()) {
       throw new Error('Cannot delete appointment that is not in booked status or is in the past');
     }
     
@@ -304,8 +304,9 @@ class AppointmentService {
       const { appointmentId, hospitalId, doctorId } = trackingUtil.verifyToken(token);
       
       // Check if we have cached queue data (short TTL for freshness)
-      const todayIST = TimezoneUtil.getTodayIST();
-      const todayStr = TimezoneUtil.formatDateIST(todayIST, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
+      const todayIST = TimezoneUtil.getCurrentIst();
+      todayIST.setHours(0, 0, 0, 0); // Start of day
+      const todayStr = todayIST.toISOString().split('T')[0]; // YYYY-MM-DD format
       const trackingCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${todayStr}:${appointmentId}`;
       
       if (!skipCache) {
@@ -324,7 +325,8 @@ class AppointmentService {
       }
       
       // Get today's appointments for the same doctor to build the queue using IST
-      const todayDate = TimezoneUtil.getTodayIST();
+      const todayDate = TimezoneUtil.getCurrentIst();
+      todayDate.setHours(0, 0, 0, 0); // Start of day
       
       // Use a short cache for today's appointments
       const queueCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${todayStr}`;
@@ -363,7 +365,7 @@ class AppointmentService {
       
       const queueInfo = todayAppointments.map((apt, index) => {
         const formattedTime = apt.startTime
-          ? TimezoneUtil.formatTimeIST(apt.startTime, { hour: '2-digit', minute: '2-digit', hour12: true })
+          ? new Date(apt.startTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
           : 'Not specified';
           
         if (apt.id === appointmentId) {
@@ -409,7 +411,7 @@ class AppointmentService {
           totalAppointmentsToday: todayAppointments.length,
           appointments: queueInfo
         },
-        refreshedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
+        refreshedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
       };
       
       // Cache the tracking result for 60 seconds
@@ -445,78 +447,7 @@ class AppointmentService {
     return trackingUtil.generateTrackingLink(appointmentId, hospitalId, doctorId);
   }
   
-  /**
-   * Send WhatsApp notification for an appointment
-   */
-  async sendAppointmentNotification(appointment, trackingLink) {
-    try {
-      // Format appointment date and time for the message using IST
-      const appointmentDate = TimezoneUtil.formatDateIST(appointment.appointmentDate, { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      
-      const startTime = appointment.startTime 
-        ? TimezoneUtil.formatTimeIST(appointment.startTime, { hour: '2-digit', minute: '2-digit', hour12: true })
-        : 'N/A';
-      
-      // Construct the WhatsApp message
-      const message = {
-        to: appointment.mobile,
-        hospitalId: appointment.hospitalId,
-        content: `Thank you for booking an appointment with ${appointment.hospital.name}!
 
-          Your appointment with Dr. ${appointment.doctor.name} is confirmed for ${appointmentDate} at ${startTime}.
-
-          Track your appointment queue status: ${trackingLink}
-          • Check your position in the queue
-          • See how many patients are ahead of you
-          • Get notified when it's your turn
-          • View the full day's appointment schedule
-
-          Need to reschedule or cancel? Click the tracking link above.
-
-          We look forward to seeing you!`
-        };
-      
-      // Send WhatsApp message
-      const messageId = await messageService.sendMessage('whatsapp', message);
-      
-      // Also send notification to hospital
-      const hospitalMessage = {
-        hospitalId: appointment.hospitalId,
-        content: `New appointment booked:
-
-        Patient: ${appointment.patientName}
-        Doctor: ${appointment.doctor.name}
-        Date: ${appointmentDate}
-        Time: ${startTime}
-        Mobile: ${appointment.mobile}
-        Status: ${appointment.status}
-        Payment: ${appointment.paymentStatus}`
-      };
-      
-      await messageService.sendMessage('email', {
-        to: appointment.hospital.contactInfo?.email || 'admin@hospital.com',
-        subject: `New Appointment - ${appointment.patientName}`,
-        content: hospitalMessage.content,
-        hospitalId: appointment.hospitalId
-      });
-      
-      // Update appointment notification status
-      await prisma.appointment.update({
-        where: { id: appointment.id },
-        data: { notificationStatus: 'sent' }
-      });
-      
-      return messageId;
-    } catch (error) {
-      console.error('Error sending appointment notification:', error);
-      // Don't throw - notification failure shouldn't break appointment creation
-    }
-  }
   
   /**
    * Invalidate tracking caches for a hospital and doctor
@@ -524,7 +455,9 @@ class AppointmentService {
   async invalidateTrackingCaches(hospitalId, doctorId) {
     try {
       // Clear any doctor/hospital specific caches using IST
-      const todayIST = TimezoneUtil.formatDateIST(TimezoneUtil.getCurrentDateIST(), { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
+      const todayIST = TimezoneUtil.getCurrentIst();
+      todayIST.setHours(0, 0, 0, 0);
+      const todayStr = todayIST.toISOString().split('T')[0]; // YYYY-MM-DD format
       const cachePatterns = [
         `tracking:queue:${hospitalId}:${doctorId}:${todayIST}*`
       ];
@@ -583,7 +516,7 @@ class AppointmentService {
           doctorId: doctorId,
           hospitalId: hospitalId,
           status: 'active',
-          dayOfWeek: TimezoneUtil.getCurrentDayOfWeekIST() // Today's day of week in IST
+          dayOfWeek: TimezoneUtil.getCurrentIst().getDay() // Today's day of week in IST (0=Sunday, 6=Saturday)
         }
       });
       
@@ -632,13 +565,18 @@ class AppointmentService {
       }
 
       // Get today's date in IST
-      const today = TimezoneUtil.getTodayIST();
+      const today = TimezoneUtil.getCurrentIst();
+      today.setHours(0, 0, 0, 0); // Start of day
       
       // Get tomorrow's date in IST
-      const tomorrow = TimezoneUtil.getTomorrowIST();
+      const tomorrow = TimezoneUtil.getCurrentIst();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0); // Start of day
       
       // Get day after tomorrow to create proper range
-      const dayAfterTomorrow = TimezoneUtil.getDatePlusDaysIST(2);
+      const dayAfterTomorrow = TimezoneUtil.getCurrentIst();
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      dayAfterTomorrow.setHours(0, 0, 0, 0); // Start of day
 
       // Fetch both today's and tomorrow's appointments in a single query
       const allAppointments = await prisma.appointment.findMany({
@@ -684,7 +622,7 @@ class AppointmentService {
         today: todayAppointments,
         tomorrow: tomorrowAppointments,
         history: appointmentHistory,
-        fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
+        fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
       };
 
       // Cache for 2 minutes (120 seconds)
@@ -720,11 +658,11 @@ class AppointmentService {
       }
 
       // Calculate date range in IST (last N days)
-      const endDate = TimezoneUtil.getCurrentDateIST();
+      const endDate = TimezoneUtil.getCurrentIst();
       endDate.setDate(endDate.getDate() - 2); // Include today
       endDate.setHours(23, 59, 59, 999); // End of today
       
-      const startDate = TimezoneUtil.getCurrentDateIST();
+      const startDate = TimezoneUtil.getCurrentIst();
       startDate.setDate(startDate.getDate() - days);
       startDate.setHours(0, 0, 0, 0); // Start of the day N days ago
 
@@ -769,7 +707,7 @@ class AppointmentService {
           },
           statusBreakdown: statusSummary
         },
-        fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
+        fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
       };
 
       // Cache for 5 minutes for history data
@@ -806,6 +744,7 @@ class AppointmentService {
           id: true,
           name: true,
           logo: true,
+          themeColor: true,
           address: true,
           contactInfo: true
         }
@@ -815,9 +754,17 @@ class AppointmentService {
         throw new Error('Hospital not found');
       }
 
-      // Get active doctors with their schedules for the next 2 days in IST
-      const today = TimezoneUtil.getCurrentDateIST();
-      const tomorrow = TimezoneUtil.getTomorrowIST();
+      // Get current IST date and time for calculations
+      const currentISTTime = TimezoneUtil.getCurrentIst();
+      
+      // Extract IST date components properly - use UTC methods since the Date object 
+      // contains IST values but is treated as UTC by JavaScript
+      const today = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate());
+      const tomorrow = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate() + 1);
+      
+      // Get day of week for IST dates (0=Sunday, 1=Monday, etc.)
+      const todayDayOfWeek = today.getDay();
+      const tomorrowDayOfWeek = tomorrow.getDay();
       
       const activeDoctors = await prisma.doctor.findMany({
         where: {
@@ -835,7 +782,7 @@ class AppointmentService {
             where: {
               status: 'active',
               dayOfWeek: {
-                in: [TimezoneUtil.getDayOfWeekIST(today), TimezoneUtil.getDayOfWeekIST(tomorrow)]
+                in: [todayDayOfWeek, tomorrowDayOfWeek]
               }
             },
             select: {
@@ -870,7 +817,7 @@ class AppointmentService {
           contactInfo: hospital.contactInfo
         },
         doctors: doctorsWithAvailability,
-        fetchedAt: TimezoneUtil.toISTISOString(TimezoneUtil.getCurrentDateIST())
+        fetchedAt: TimezoneUtil.getIstISOString(currentISTTime)
       };
 
       console.log('Debug: Final result structure:', JSON.stringify(result, null, 2));
@@ -894,14 +841,31 @@ class AppointmentService {
    */
   async calculateDoctorAvailability(hospitalId, doctorId, schedules) {
     try {
-      const today = TimezoneUtil.getCurrentDateIST();
-      const tomorrow = TimezoneUtil.getTomorrowIST();
-      const dayAfterTomorrow = TimezoneUtil.getDatePlusDaysIST(2);
+      // Get current IST time
+      const currentISTTime = TimezoneUtil.getCurrentIst();
+      
+      // Extract IST date components properly - use UTC methods since the Date object 
+      // contains IST values but is treated as UTC by JavaScript
+      const today = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate());
+      const tomorrow = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate() + 1);
+      const dayAfterTomorrow = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate() + 2);
+      
+      console.log('Debug - Current IST Time:', currentISTTime);
+      console.log('Debug - Today IST:', today, 'Day:', today.getDay());
+      console.log('Debug - Tomorrow IST:', tomorrow, 'Day:', tomorrow.getDay());
+      
+      // Get day of week for IST dates (0=Sunday, 1=Monday, etc.)
+      const todayDayOfWeek = today.getDay();
+      const tomorrowDayOfWeek = tomorrow.getDay();
             
-      const todaySchedule = schedules.find(s => s.dayOfWeek === TimezoneUtil.getDayOfWeekIST(today));
-      const tomorrowSchedule = schedules.find(s => s.dayOfWeek === TimezoneUtil.getDayOfWeekIST(tomorrow));
+      const todaySchedule = schedules.find(s => s.dayOfWeek === todayDayOfWeek);
+      const tomorrowSchedule = schedules.find(s => s.dayOfWeek === tomorrowDayOfWeek);
 
       // Get existing appointments for today and tomorrow
+      // Convert IST dates to UTC for database query since DB stores UTC
+      const todayUTC = TimezoneUtil.istToUtc(today);
+      const dayAfterTomorrowUTC = TimezoneUtil.istToUtc(dayAfterTomorrow);
+      
       // Only consider 'booked' and 'completed' appointments as occupied slots
       // 'cancelled' and 'missed' appointments free up the slots
       const existingAppointments = await prisma.appointment.findMany({
@@ -909,8 +873,8 @@ class AppointmentService {
           hospitalId,
           doctorId,
           appointmentDate: {
-            gte: today,
-            lt: dayAfterTomorrow
+            gte: todayUTC,
+            lt: dayAfterTomorrowUTC
           },
           status: {
             in: [APPOINTMENT_STATUS.BOOKED] // Only these statuses block slots
@@ -924,13 +888,27 @@ class AppointmentService {
         }
       });
 
+      // Convert appointment times from UTC to IST for processing
+      const existingAppointmentsIST = existingAppointments.map(apt => ({
+        ...apt,
+        appointmentDate: TimezoneUtil.formatForFrontend(apt.appointmentDate),
+        startTime: apt.startTime ? TimezoneUtil.formatForFrontend(apt.startTime) : null,
+        endTime: apt.endTime ? TimezoneUtil.formatForFrontend(apt.endTime) : null
+      }));
 
-      const todaySlots = todaySchedule ? this.generateAvailableSlots(todaySchedule, today, existingAppointments) : [];
-      const tomorrowSlots = tomorrowSchedule ? this.generateAvailableSlots(tomorrowSchedule, tomorrow, existingAppointments) : [];
+      const todaySlots = todaySchedule ? this.generateAvailableSlots(todaySchedule, today, existingAppointmentsIST) : [];
+      const tomorrowSlots = tomorrowSchedule ? this.generateAvailableSlots(tomorrowSchedule, tomorrow, existingAppointmentsIST) : [];
 
       // Calculate summary statistics
       const todayAvailable = todaySlots.filter(slot => slot.available).length;
       const tomorrowAvailable = tomorrowSlots.filter(slot => slot.available).length;
+
+      // Format dates for display (IST)
+      const todayFormatted = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+      const tomorrowFormatted = tomorrow.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+      
+      const todayDayName = today.toLocaleDateString('en-US', { weekday: 'long' });
+      const tomorrowDayName = tomorrow.toLocaleDateString('en-US', { weekday: 'long' });
 
       return {
         today: {
@@ -938,16 +916,16 @@ class AppointmentService {
           totalSlots: todaySlots.length,
           availableSlots: todayAvailable,
           occupiedSlots: todaySlots.length - todayAvailable,
-          date: TimezoneUtil.formatDateIST(today, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'),
-          dayName: TimezoneUtil.formatDateIST(today, { weekday: 'long' })
+          date: todayFormatted,
+          dayName: todayDayName
         },
         tomorrow: {
           slots: tomorrowSlots,
           totalSlots: tomorrowSlots.length,
           availableSlots: tomorrowAvailable,
           occupiedSlots: tomorrowSlots.length - tomorrowAvailable,
-          date: TimezoneUtil.formatDateIST(tomorrow, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'),
-          dayName: TimezoneUtil.formatDateIST(tomorrow, { weekday: 'long' })
+          date: tomorrowFormatted,
+          dayName: tomorrowDayName
         },
         summary: {
           totalAvailableSlots: todayAvailable + tomorrowAvailable,
@@ -967,8 +945,8 @@ class AppointmentService {
   /**
    * Generate available time slots for a doctor on a specific date
    * @param {object} schedule - Doctor schedule for the day
-   * @param {Date} date - Date for which to generate slots
-   * @param {array} existingAppointments - Existing appointments (only booked/completed)
+   * @param {Date} date - Date for which to generate slots (IST date)
+   * @param {array} existingAppointments - Existing appointments (already converted to IST)
    * @returns {array} Array of time slots with availability status
    */
   generateAvailableSlots(schedule, date, existingAppointments) {
@@ -1015,8 +993,10 @@ class AppointmentService {
       endTime.setHours(endHour, endMinute, 0, 0);
 
       // Skip past slots for today using IST
-      const nowIST = TimezoneUtil.getCurrentDateIST();
-      if (TimezoneUtil.isTodayIST(date) && currentTime <= nowIST) {
+      const nowIST = TimezoneUtil.getCurrentIst();
+      const isToday = date.toDateString() === nowIST.toDateString();
+      
+      if (isToday && currentTime <= nowIST) {
         // Round up to next available slot
         const minutesToAdd = consultationTime - (nowIST.getMinutes() % consultationTime);
         currentTime = new Date(nowIST.getTime() + minutesToAdd * 60000);
@@ -1038,10 +1018,11 @@ class AppointmentService {
           break;
         }
         
-        // For today's slots, skip if the slot time has already passed
-        if (TimezoneUtil.isTodayIST(date)) {
-          const nowIST = TimezoneUtil.getCurrentDateIST();
-          const slotDateTime = TimezoneUtil.createDateWithTimeIST(date, slotStart);
+        // For today's slots, skip if the slot time has already passed (with 5-minute buffer)
+        if (isToday) {
+          const slotDateTime = new Date(date);
+          const [slotHour, slotMinute] = slotStart.split(':').map(Number);
+          slotDateTime.setHours(slotHour, slotMinute, 0, 0);
           
           // Skip slots that have already passed (with a 5-minute buffer)
           if (slotDateTime.getTime() <= nowIST.getTime() + (5 * 60 * 1000)) {
@@ -1066,8 +1047,7 @@ class AppointmentService {
           start: slotStart,
           end: slotEnd,
           available: isAvailable,
-          date: TimezoneUtil.formatDateIST(date, { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'),
-          timeDisplay: this.formatTimeDisplay(slotStart, slotEnd)
+          date: date.toLocaleDateString('en-CA'), // YYYY-MM-DD format
         };
 
         // Add reason if slot is not available
@@ -1084,26 +1064,6 @@ class AppointmentService {
     return slots;
   }
 
-  /**
-   * Format time display for user-friendly presentation
-   * @param {string} startTime - Start time in HH:MM format
-   * @param {string} endTime - End time in HH:MM format
-   * @returns {string} Formatted time display
-   */
-  formatTimeDisplay(startTime, endTime) {
-    const formatTime = (time) => {
-      const [hours, minutes] = time.split(':').map(Number);
-      const date = TimezoneUtil.getCurrentDateIST();
-      date.setHours(hours, minutes);
-      return TimezoneUtil.formatTimeIST(date, { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        hour12: true 
-      });
-    };
-
-    return `${formatTime(startTime)} - ${formatTime(endTime)}`;
-  }
 
   /**
    * Helper method to add minutes to time string
@@ -1113,7 +1073,7 @@ class AppointmentService {
    */
   addMinutesToTime(timeStr, minutes) {
     const [hours, mins] = timeStr.split(':').map(Number);
-    const date = TimezoneUtil.getCurrentDateIST();
+    const date = TimezoneUtil.getCurrentIst();
     date.setHours(hours, mins);
     date.setMinutes(date.getMinutes() + minutes);
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
