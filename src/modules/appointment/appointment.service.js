@@ -22,6 +22,7 @@ class AppointmentService {
           doctorId: appointmentData.doctorId,
           patientName: appointmentData.patientName,
           mobile: appointmentData.mobile,
+          createdAt:TimezoneUtil.getCurrentIst(),
           age: appointmentData.age,
           appointmentDate: new Date(appointmentData.appointmentDate),
           startTime: appointmentData.startTime ? new Date(`1970-01-01T${appointmentData.startTime}:00`) : null,
@@ -447,7 +448,6 @@ class AppointmentService {
     return trackingUtil.generateTrackingLink(appointmentId, hospitalId, doctorId);
   }
   
-
   
   /**
    * Invalidate tracking caches for a hospital and doctor
@@ -550,91 +550,100 @@ class AppointmentService {
    * @returns {object} Object containing today's and tomorrow's appointments
    */
   async getTodayAndTomorrowandPastWeekAppointments(hospitalId) {
-    try {
-      if (!hospitalId) {
-        throw new Error('Hospital ID is required');
-      }
-
-      // Cache key for today and tomorrow appointments with 2-minute TTL
-      const cacheKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}today_tomorrow:${hospitalId}`;
-      
-      // Try to get from cache first
-      const cachedAppointments = await redisService.getCache(cacheKey);
-      if (cachedAppointments) {
-        return cachedAppointments;
-      }
-
-      // Get today's date in IST
-      const today = TimezoneUtil.getCurrentIst();
-      today.setHours(0, 0, 0, 0); // Start of day
-      
-      // Get tomorrow's date in IST
-      const tomorrow = TimezoneUtil.getCurrentIst();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0); // Start of day
-      
-      // Get day after tomorrow to create proper range
-      const dayAfterTomorrow = TimezoneUtil.getCurrentIst();
-      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
-      dayAfterTomorrow.setHours(0, 0, 0, 0); // Start of day
-
-      // Fetch both today's and tomorrow's appointments in a single query
-      const allAppointments = await prisma.appointment.findMany({
-        where: {
-          hospitalId: hospitalId,
-          appointmentDate: {
-            gte: today,
-            lt: dayAfterTomorrow
-          }
-        },
-        include: {
-          doctor: {
-            select: {
-              id: true,
-              name: true,
-              specialization: true,
-              photo: true
-            }
-          }
-        },
-        orderBy: [
-          { appointmentDate: 'asc' },
-          { startTime: 'asc' }
-        ]
-      });
-
-      // Separate today's and tomorrow's appointments
-      const todayAppointments = allAppointments.filter(apt => {
-        const aptDate = new Date(apt.appointmentDate);
-        aptDate.setHours(0, 0, 0, 0);
-        return aptDate.getTime() === today.getTime();
-      });
-      
-      const tomorrowAppointments = allAppointments.filter(apt => {
-        const aptDate = new Date(apt.appointmentDate);
-        aptDate.setHours(0, 0, 0, 0);
-        return aptDate.getTime() === tomorrow.getTime();
-      });
-
-      const appointmentHistory= await this.getAppointmentHistory(hospitalId, 7);
-
-      const result = {
-        today: todayAppointments,
-        tomorrow: tomorrowAppointments,
-        history: appointmentHistory,
-        fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
-      };
-
-      // Cache for 2 minutes (120 seconds)
-      await redisService.setCache(cacheKey, result, 120);
-      
-      return result;
-
-    } catch (error) {
-      console.error('Error fetching today and tomorrow appointments:', error);
-      throw error;
+  try {
+    if (!hospitalId) {
+      throw new Error('Hospital ID is required');
     }
+
+    const cacheKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}today_tomorrow:${hospitalId}`;
+
+    // Try to get from cache
+    const cachedAppointments = await redisService.getCache(cacheKey);
+    if (cachedAppointments) {
+      return cachedAppointments;
+    }
+
+    // Helper to get start of day in IST safely
+    const getISTStartOfDay = (date) => {
+      const istOffset = 5.5 * 60 * 60000;
+      const utcMidnight = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+      return new Date(utcMidnight + istOffset);
+    };
+
+    const nowIST = TimezoneUtil.getCurrentIst(); // returns IST Date
+    const today = getISTStartOfDay(nowIST);
+    const tomorrow = getISTStartOfDay(new Date(today.getTime() + 86400000));
+    const dayAfterTomorrow = getISTStartOfDay(new Date(tomorrow.getTime() + 86400000));
+
+
+    // Fetch appointments from today to tomorrow (2-day window)
+    const allAppointments = await prisma.appointment.findMany({
+      where: {
+        hospitalId,
+        appointmentDate: {
+          gte: today,
+          lt: dayAfterTomorrow
+        }
+      },
+      include: {
+        doctor: {
+          select: {
+            id: true,
+            name: true,
+            specialization: true,
+            photo: true
+          }
+        }
+      },
+      orderBy: [
+        { appointmentDate: 'asc' },
+        { startTime: 'asc' }
+      ]
+    });
+
+    // Match using date string comparison
+    const todayStr = today.toISOString().split('T')[0];
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const mapToIST = (appointments) => {
+      return appointments.map(apt => ({
+        ...apt,
+        appointmentDate: TimezoneUtil.utcToIst(apt.appointmentDate),
+        startTime: apt.startTime ? TimezoneUtil.utcToIst(apt.startTime) : null,
+        endTime: apt.endTime ? TimezoneUtil.utcToIst(apt.endTime) : null
+      }));
+    };
+
+    const todayAppointments = mapToIST(
+      allAppointments.filter(apt =>
+        apt.appointmentDate.toISOString().startsWith(todayStr)
+      )
+    );
+
+    const tomorrowAppointments = mapToIST(
+      allAppointments.filter(apt =>
+        apt.appointmentDate.toISOString().startsWith(tomorrowStr)
+      )
+    );
+    const appointmentHistory = await this.getAppointmentHistory(hospitalId, 7);
+
+    const result = {
+      today: todayAppointments,
+      tomorrow: tomorrowAppointments,
+      history: appointmentHistory,
+      fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
+    };
+
+    // Cache for 2 minutes
+    await redisService.setCache(cacheKey, result, 120);
+
+    return result;
+
+  } catch (error) {
+    console.error('Error fetching today and tomorrow appointments:', error);
+    throw error;
   }
+}
 
   /**
    * Get appointment history for the last 30 days for a hospital
@@ -710,8 +719,8 @@ class AppointmentService {
         fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
       };
 
-      // Cache for 5 minutes for history data
-      await redisService.setCache(cacheKey, result, 600);
+      // Cache for 1 hrs for history data
+      await redisService.setCache(cacheKey, result, 3600);
 
       return result;
     } catch (error) {
@@ -720,364 +729,216 @@ class AppointmentService {
     }
   }
   
-  /**
-   * Get hospital details by subdomain for appointment booking
-   * @param {string} subdomain - Hospital subdomain
-   * @returns {object} Hospital details with available doctors and schedules
-   */
+
+  // /**
+  //  * Get hospital details by subdomain with doctor availability for appointments
+  //  * @param {string} subdomain - The hospital's subdomain
+  //  * @returns {Promise<Object>} Hospital details with doctor availability
+  //  */
+
   async getHospitalDetailsBySubdomainForAppointment(subdomain) {
+  try {
+    const cacheKey = `hospital:public:${subdomain}`;
 
-    try {
-      // Cache key for hospital public details
-      const cacheKey = `hospital:public:${subdomain}`;
-      
-      // Try to get from cache first
-      const cachedDetails = await redisService.getCache(cacheKey);
-      if (cachedDetails) {
-        return cachedDetails;
-      }
+    // Try to get from cache first
+    const cachedDetails = await redisService.getCache(cacheKey);
+    if (cachedDetails) {
+      return cachedDetails;
+    }
 
-      // Get hospital by subdomain
-      const hospital = await prisma.hospital.findUnique({
-        where: { subdomain: subdomain },
-        select: {
-          id: true,
-          name: true,
-          logo: true,
-          themeColor: true,
-          address: true,
-          contactInfo: true
-        }
-      });
-
-      if (!hospital) {
-        throw new Error('Hospital not found');
-      }
-
-      // Get current IST date and time for calculations
-      const currentISTTime = TimezoneUtil.getCurrentIst();
-      
-      // Extract IST date components properly - use UTC methods since the Date object 
-      // contains IST values but is treated as UTC by JavaScript
-      const today = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate());
-      const tomorrow = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate() + 1);
-      
-      // Get day of week for IST dates (0=Sunday, 1=Monday, etc.)
-      const todayDayOfWeek = today.getDay();
-      const tomorrowDayOfWeek = tomorrow.getDay();
-      
-      const activeDoctors = await prisma.doctor.findMany({
-        where: {
-          hospitalId: hospital.id,
-          status: 'active'
-        },
-        select: {
-          id: true,
-          name: true,
-          specialization: true,
-          qualification: true,
-          experience: true,
-          photo: true,
-          schedules: {
-            where: {
-              status: 'active',
-              dayOfWeek: {
-                in: [todayDayOfWeek, tomorrowDayOfWeek]
+    // Fetch hospital details along with active doctors and their schedules
+    const hospital = await prisma.hospital.findUnique({
+      where: { subdomain },
+      select: {
+        id: true,
+        name: true,
+        logo: true,
+        themeColor: true,
+        address: true,
+        contactInfo: true,
+        doctors: {
+          where: { status: 'active' },
+          select: {
+            id: true,
+            name: true,
+            specialization: true,
+            qualification: true,
+            photo: true,
+            schedules: {
+              where: { status: 'active' },
+              select: {
+                dayOfWeek: true,
+                timeRanges: true,
+                avgConsultationTime: true,
+                status: true
               }
-            },
-            select: {
-              id: true,
-              dayOfWeek: true,
-              timeRanges: true,
-              avgConsultationTime: true,
-              status: true
             }
           }
         }
-      });
-
-      // Calculate available slots for each doctor for today and tomorrow
-      const doctorsWithAvailability = await Promise.all(
-        activeDoctors.map(async (doctor) => {
-          const availability = await this.calculateDoctorAvailability(hospital.id, doctor.id, doctor.schedules);
-          return {
-            ...doctor,
-            availability
-          };
-        })
-      );
-
-      const result = {
-        hospital: {
-          id: hospital.id,
-          name: hospital.name,
-          logo: hospital.logo,
-          themeColor: hospital.themeColor || '#2563EB',
-          address: hospital.address,
-          contactInfo: hospital.contactInfo
-        },
-        doctors: doctorsWithAvailability,
-        fetchedAt: TimezoneUtil.getIstISOString(currentISTTime)
-      };
-
-      console.log('Debug: Final result structure:', JSON.stringify(result, null, 2));
-
-      // Cache for 1 minute (temporarily disabled for debugging)
-      // await redisService.setCache(cacheKey, result, 60);
-      
-      return result;
-    } catch (error) {
-      console.error('Error fetching hospital details by subdomain:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Calculate doctor availability for today and tomorrow
-   * @param {string} hospitalId - Hospital ID
-   * @param {string} doctorId - Doctor ID
-   * @param {array} schedules - Doctor schedules
-   * @returns {object} Availability object with today and tomorrow slots
-   */
-  async calculateDoctorAvailability(hospitalId, doctorId, schedules) {
-    try {
-      // Get current IST time
-      const currentISTTime = TimezoneUtil.getCurrentIst();
-      
-      // Extract IST date components properly - use UTC methods since the Date object 
-      // contains IST values but is treated as UTC by JavaScript
-      const today = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate());
-      const tomorrow = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate() + 1);
-      const dayAfterTomorrow = new Date(currentISTTime.getUTCFullYear(), currentISTTime.getUTCMonth(), currentISTTime.getUTCDate() + 2);
-      
-      console.log('Debug - Current IST Time:', currentISTTime);
-      console.log('Debug - Today IST:', today, 'Day:', today.getDay());
-      console.log('Debug - Tomorrow IST:', tomorrow, 'Day:', tomorrow.getDay());
-      
-      // Get day of week for IST dates (0=Sunday, 1=Monday, etc.)
-      const todayDayOfWeek = today.getDay();
-      const tomorrowDayOfWeek = tomorrow.getDay();
-            
-      const todaySchedule = schedules.find(s => s.dayOfWeek === todayDayOfWeek);
-      const tomorrowSchedule = schedules.find(s => s.dayOfWeek === tomorrowDayOfWeek);
-
-      // Get existing appointments for today and tomorrow
-      // Convert IST dates to UTC for database query since DB stores UTC
-      const todayUTC = TimezoneUtil.istToUtc(today);
-      const dayAfterTomorrowUTC = TimezoneUtil.istToUtc(dayAfterTomorrow);
-      
-      // Only consider 'booked' and 'completed' appointments as occupied slots
-      // 'cancelled' and 'missed' appointments free up the slots
-      const existingAppointments = await prisma.appointment.findMany({
-        where: {
-          hospitalId,
-          doctorId,
-          appointmentDate: {
-            gte: todayUTC,
-            lt: dayAfterTomorrowUTC
-          },
-          status: {
-            in: [APPOINTMENT_STATUS.BOOKED] // Only these statuses block slots
-          }
-        },
-        select: {
-          appointmentDate: true,
-          startTime: true,
-          endTime: true,
-          status: true
-        }
-      });
-
-      // Convert appointment times from UTC to IST for processing
-      const existingAppointmentsIST = existingAppointments.map(apt => ({
-        ...apt,
-        appointmentDate: TimezoneUtil.formatForFrontend(apt.appointmentDate),
-        startTime: apt.startTime ? TimezoneUtil.formatForFrontend(apt.startTime) : null,
-        endTime: apt.endTime ? TimezoneUtil.formatForFrontend(apt.endTime) : null
-      }));
-
-      const todaySlots = todaySchedule ? this.generateAvailableSlots(todaySchedule, today, existingAppointmentsIST) : [];
-      const tomorrowSlots = tomorrowSchedule ? this.generateAvailableSlots(tomorrowSchedule, tomorrow, existingAppointmentsIST) : [];
-
-      // Calculate summary statistics
-      const todayAvailable = todaySlots.filter(slot => slot.available).length;
-      const tomorrowAvailable = tomorrowSlots.filter(slot => slot.available).length;
-
-      // Format dates for display (IST)
-      const todayFormatted = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-      const tomorrowFormatted = tomorrow.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-      
-      const todayDayName = today.toLocaleDateString('en-US', { weekday: 'long' });
-      const tomorrowDayName = tomorrow.toLocaleDateString('en-US', { weekday: 'long' });
-
-      return {
-        today: {
-          slots: todaySlots,
-          totalSlots: todaySlots.length,
-          availableSlots: todayAvailable,
-          occupiedSlots: todaySlots.length - todayAvailable,
-          date: todayFormatted,
-          dayName: todayDayName
-        },
-        tomorrow: {
-          slots: tomorrowSlots,
-          totalSlots: tomorrowSlots.length,
-          availableSlots: tomorrowAvailable,
-          occupiedSlots: tomorrowSlots.length - tomorrowAvailable,
-          date: tomorrowFormatted,
-          dayName: tomorrowDayName
-        },
-        summary: {
-          totalAvailableSlots: todayAvailable + tomorrowAvailable,
-          hasAvailability: (todayAvailable + tomorrowAvailable) > 0
-        }
-      };
-    } catch (error) {
-      console.error('Error calculating doctor availability:', error);
-      return { 
-        today: { slots: [], totalSlots: 0, availableSlots: 0, occupiedSlots: 0 }, 
-        tomorrow: { slots: [], totalSlots: 0, availableSlots: 0, occupiedSlots: 0 },
-        summary: { totalAvailableSlots: 0, hasAvailability: false }
-      };
-    }
-  }
-
-  /**
-   * Generate available time slots for a doctor on a specific date
-   * @param {object} schedule - Doctor schedule for the day
-   * @param {Date} date - Date for which to generate slots (IST date)
-   * @param {array} existingAppointments - Existing appointments (already converted to IST)
-   * @returns {array} Array of time slots with availability status
-   */
-  generateAvailableSlots(schedule, date, existingAppointments) {
-    const slots = [];
-    const consultationTime = schedule.avgConsultationTime || 5; // Default 5 minutes
-    
-    // Filter existing appointments for this date
-    const dayAppointments = existingAppointments.filter(apt => {
-      const aptDate = new Date(apt.appointmentDate);
-      aptDate.setHours(0, 0, 0, 0); // Normalize to start of day
-      const filterDate = new Date(date);
-      filterDate.setHours(0, 0, 0, 0); // Normalize to start of day
-      return aptDate.getTime() === filterDate.getTime();
+      }
     });
 
-    // Convert existing appointments to occupied time slots
-    const occupiedSlots = dayAppointments.map(apt => {
-      const startTime = apt.startTime ? new Date(apt.startTime) : null;
-      if (!startTime) return null;
-      
-      return {
-        start: `${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`,
-        end: apt.endTime ? 
-          (() => {
-            const endTime = new Date(apt.endTime);
-            return `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
-          })() :
-          this.addMinutesToTime(`${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`, consultationTime),
-        status: apt.status
-      };
-    }).filter(slot => slot !== null);
+    if (!hospital) {
+      throw new Error('Hospital not found');
+    }
 
-    // Generate slots for each time range in the schedule
-    schedule.timeRanges.forEach(range => {
-      const startHour = parseInt(range.start.split(':')[0]);
-      const startMinute = parseInt(range.start.split(':')[1]);
-      const endHour = parseInt(range.end.split(':')[0]);
-      const endMinute = parseInt(range.end.split(':')[1]);
+    // Get IST-adjusted start of days for today, tomorrow, and day after
+    const getISTStartOfDay = (date) => {
+      const istOffset = 5.5 * 60 * 60000;
+      const utc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+      return new Date(utc + istOffset);
+    };
 
-      let currentTime = new Date(date);
-      currentTime.setHours(startHour, startMinute, 0, 0);
-      
-      const endTime = new Date(date);
-      endTime.setHours(endHour, endMinute, 0, 0);
+    const nowIST = TimezoneUtil.getCurrentIst(); // Should return IST-based Date
+    const todayStart = getISTStartOfDay(nowIST);
+    const tomorrowStart = getISTStartOfDay(new Date(todayStart.getTime() + 86400000));
+    const dayAfterTomorrow = getISTStartOfDay(new Date(tomorrowStart.getTime() + 86400000));
 
-      // Skip past slots for today using IST
-      const nowIST = TimezoneUtil.getCurrentIst();
-      const isToday = date.toDateString() === nowIST.toDateString();
-      
-      if (isToday && currentTime <= nowIST) {
-        // Round up to next available slot
-        const minutesToAdd = consultationTime - (nowIST.getMinutes() % consultationTime);
-        currentTime = new Date(nowIST.getTime() + minutesToAdd * 60000);
-        currentTime.setSeconds(0, 0);
-        
-        // If the rounded time is past the schedule end time, skip this range
-        if (currentTime >= endTime) {
-          return;
-        }
+    // Fetch all appointments from today to tomorrow (exclusive of day after)
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        hospitalId: hospital.id,
+        appointmentDate: {
+          gte: todayStart,
+          lt: dayAfterTomorrow
+        },
+        status: 'booked'
+      },
+      select: {
+        doctorId: true,
+        appointmentDate: true,
+        startTime: true,
+        endTime: true
       }
+    });
 
-      // Generate all slots within the time range
-      while (currentTime < endTime) {
-        const slotStart = `${String(currentTime.getHours()).padStart(2, '0')}:${String(currentTime.getMinutes()).padStart(2, '0')}`;
-        const slotEndTime = new Date(currentTime.getTime() + consultationTime * 60000);
-        
-        // Skip if slot extends beyond schedule end time
-        if (slotEndTime > endTime) {
-          break;
-        }
-        
-        // For today's slots, skip if the slot time has already passed (with 5-minute buffer)
-        if (isToday) {
-          const slotDateTime = new Date(date);
-          const [slotHour, slotMinute] = slotStart.split(':').map(Number);
-          slotDateTime.setHours(slotHour, slotMinute, 0, 0);
-          
-          // Skip slots that have already passed (with a 5-minute buffer)
-          if (slotDateTime.getTime() <= nowIST.getTime() + (5 * 60 * 1000)) {
-            currentTime.setMinutes(currentTime.getMinutes() + consultationTime);
-            continue;
+    // Process each doctor's availability
+    const doctorsWithAvailability = await Promise.all(
+      hospital.doctors.map(async (doctor) => {
+        const todaySchedule = doctor.schedules.find(s => s.dayOfWeek === todayStart.getDay());
+        const tomorrowSchedule = doctor.schedules.find(s => s.dayOfWeek === tomorrowStart.getDay());
+
+        const doctorAppointments = appointments.filter(apt => apt.doctorId === doctor.id);
+        const todayDateStr = todayStart.toISOString().split('T')[0];
+        const tomorrowDateStr = tomorrowStart.toISOString().split('T')[0];
+
+        const todayAppointments = doctorAppointments.filter(apt =>
+          apt.appointmentDate.toISOString().startsWith(todayDateStr)
+        );
+        const tomorrowAppointments = doctorAppointments.filter(apt =>
+          apt.appointmentDate.toISOString().startsWith(tomorrowDateStr)
+        );
+
+        const availability = {
+          today: this.generateSlots(todaySchedule, todayAppointments, todayStart),
+          tomorrow: this.generateSlots(tomorrowSchedule, tomorrowAppointments, tomorrowStart),
+          summary: {
+            totalAvailableSlots: 0,
+            hasAvailability: false
           }
-        }
-        
-        const slotEnd = `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
-
-        // Check if slot is occupied by booked or completed appointments
-        const occupiedSlot = occupiedSlots.find(occupied => {
-          return (slotStart >= occupied.start && slotStart < occupied.end) ||
-                 (slotEnd > occupied.start && slotEnd <= occupied.end) ||
-                 (slotStart <= occupied.start && slotEnd >= occupied.end);
-        });
-
-        const isAvailable = !occupiedSlot;
-        
-        // Create slot object with detailed information
-        const slot = {
-          start: slotStart,
-          end: slotEnd,
-          available: isAvailable,
-          date: date.toLocaleDateString('en-CA'), // YYYY-MM-DD format
         };
 
-        // Add reason if slot is not available
-        if (!isAvailable) {
-          slot.reason = occupiedSlot.status === 'booked' ? 'Already booked' : 'Appointment completed';
-          slot.blockedBy = occupiedSlot.status;
+        availability.summary.totalAvailableSlots =
+          availability.today.availableSlots + availability.tomorrow.availableSlots;
+        availability.summary.hasAvailability = availability.summary.totalAvailableSlots > 0;
+
+        return {
+          ...doctor,
+          availability
+        };
+      })
+    );
+
+    const data = {
+      hospital: {
+        id: hospital.id,
+        name: hospital.name,
+        logo: hospital.logo,
+        themeColor: hospital.themeColor || '#2563EB',
+        address: hospital.address,
+        contactInfo: hospital.contactInfo
+      },
+      doctors: doctorsWithAvailability,
+      fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
+    };
+
+    // Cache for 1 minute
+    await redisService.setCache(cacheKey, data, 60);
+
+    console.log('Hospital details with doctor availability cached successfully---------', JSON.stringify(data, null, 2));
+
+    return data;
+
+  } catch (error) {
+    console.error('Error getting hospital details by subdomain:', error);
+    throw error;
+  }
+}
+
+// Generate availability slots for a doctor on a given date
+  generateSlots = (schedule, dayAppointments, date) => {
+    console.log('Generating slots for date----------:', date.toISOString());
+    if (!schedule || !schedule.timeRanges || schedule.status !== 'active') {
+      return {
+        slots: [],
+        totalSlots: 0,
+        availableSlots: 0,
+        occupiedSlots: 0,
+        date: date.toISOString().split('T')[0],
+        dayName: new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(date),
+      };
+    }
+
+    const slots = [];
+
+    // Build a Set of booked slot keys like: "2025-06-02_14:00"
+    const bookedSlotSet = new Set(
+      dayAppointments.map((apt) => {
+        const dateStr = new Date(apt.appointmentDate).toISOString().split('T')[0]; // 'YYYY-MM-DD'
+        const timeStr = new Date(apt.startTime).toISOString().split('T')[1].slice(0, 5); // 'HH:mm'
+        return `${dateStr}_${timeStr}`;
+      })
+    );
+
+    for (const range of schedule.timeRanges) {
+      let currentTime = new Date(`1970-01-01T${range.start}:00`);
+      const endTime = new Date(`1970-01-01T${range.end}:00`);
+
+      while (currentTime < endTime) {
+        const slotStart = currentTime.toTimeString().slice(0, 5); // 'HH:mm'
+        currentTime = new Date(currentTime.getTime() + schedule.avgConsultationTime * 60000);
+        const slotEnd = currentTime.toTimeString().slice(0, 5);
+
+        if (currentTime <= endTime) {
+          const dateStr = date.toISOString().split('T')[0]; // 'YYYY-MM-DD'
+          const slotKey = `${dateStr}_${slotStart}`;
+          const isBooked = bookedSlotSet.has(slotKey);
+
+          slots.push({
+            start: slotStart,
+            end: slotEnd,
+            available: !isBooked,
+            date: dateStr,
+            timeDisplay: `${slotStart} - ${slotEnd}`,
+            reason: isBooked ? 'Already booked' : null,
+            blockedBy: isBooked ? 'booked' : null,
+          });
         }
-
-        slots.push(slot);
-        currentTime.setMinutes(currentTime.getMinutes() + consultationTime);
       }
-    });
+    }
 
-    return slots;
-  }
+    const totalSlots = slots.length;
+    const availableSlots = slots.filter((slot) => slot.available).length;
 
-
-  /**
-   * Helper method to add minutes to time string
-   * @param {string} timeStr - Time in HH:MM format
-   * @param {number} minutes - Minutes to add
-   * @returns {string} New time in HH:MM format
-   */
-  addMinutesToTime(timeStr, minutes) {
-    const [hours, mins] = timeStr.split(':').map(Number);
-    const date = TimezoneUtil.getCurrentIst();
-    date.setHours(hours, mins);
-    date.setMinutes(date.getMinutes() + minutes);
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-  }
+    return {
+      slots,
+      totalSlots,
+      availableSlots,
+      occupiedSlots: totalSlots - availableSlots,
+      date: date.toISOString().split('T')[0],
+      dayName: new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(date),
+    };
+  };
 
 }
 
