@@ -9,13 +9,15 @@ const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS, CACHE, QUEUES ,APPOINTME
 /**
  * Service layer for appointment-related operations
  */
-class AppointmentService {
+class AppointmentService {  
   /**
    * Create a new appointment
    */
   async createAppointment(appointmentData) {
     try {
       // Create the appointment in database
+
+      console.log('Creating appointment with data:', JSON.stringify(appointmentData, null, 2));
       const appointment = await prisma.appointment.create({
         data: {
           hospitalId: appointmentData.hospitalId,
@@ -608,9 +610,9 @@ class AppointmentService {
     const mapToIST = (appointments) => {
       return appointments.map(apt => ({
         ...apt,
-        appointmentDate: TimezoneUtil.utcToIst(apt.appointmentDate),
-        startTime: apt.startTime ? TimezoneUtil.utcToIst(apt.startTime) : null,
-        endTime: apt.endTime ? TimezoneUtil.utcToIst(apt.endTime) : null
+        appointmentDate: (apt.appointmentDate),
+        startTime:(apt.startTime),
+        endTime: (apt.endTime)
       }));
     };
 
