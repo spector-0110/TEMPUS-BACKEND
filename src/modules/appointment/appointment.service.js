@@ -891,12 +891,11 @@ class AppointmentService {
     const slots = [];
 
     // Build a Set of booked slot keys like: "2025-06-02_14:00"
-    const bookedSlotStatusMap = new Map(
+    const bookedSlotSet = new Set(
       dayAppointments.map((apt) => {
         const dateStr = new Date(apt.appointmentDate).toISOString().split('T')[0]; // 'YYYY-MM-DD'
         const timeStr = new Date(apt.startTime).toISOString().split('T')[1].slice(0, 5); // 'HH:mm'
-        const slotKey = `${dateStr}_${timeStr}`;
-        return [slotKey, apt.status]; // assuming apt.status contains values like 'booked', 'cancelled', etc.
+        return `${dateStr}_${timeStr}`;
       })
     );
 
@@ -912,10 +911,8 @@ class AppointmentService {
         if (currentTime <= endTime) {
           const dateStr = date.toISOString().split('T')[0]; // 'YYYY-MM-DD'
           const slotKey = `${dateStr}_${slotStart}`;
+          const isBooked = bookedSlotSet.has(slotKey);
           
-         const status = bookedSlotStatusMap.get(slotKey);
-          const isBooked = status === APPOINTMENT_STATUS.BOOKED;
-
           slots.push({
             start: slotStart,
             end: slotEnd,
@@ -923,7 +920,7 @@ class AppointmentService {
             date: dateStr,
             timeDisplay: `${slotStart} - ${slotEnd}`,
             reason: isBooked ? 'Already booked' : null,
-            blockedBy: isBooked ? APPOINTMENT_STATUS.BOOKED : null,
+            blockedBy: isBooked ? 'booked' : null,
           });
         }
       }
