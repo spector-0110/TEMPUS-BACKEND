@@ -867,8 +867,6 @@ class AppointmentService {
     // Cache for 1 minute
     await redisService.setCache(cacheKey, data, 60);
 
-    console.log('Hospital details with doctor availability cached successfully---------', JSON.stringify(data, null, 2));
-
     return data;
 
   } catch (error) {
@@ -879,7 +877,6 @@ class AppointmentService {
 
 // Generate availability slots for a doctor on a given date
   generateSlots = (schedule, dayAppointments, date) => {
-    console.log('Generating slots for date----------:', date.toISOString());
     if (!schedule || !schedule.timeRanges || schedule.status !== 'active') {
       return {
         slots: [],
@@ -894,11 +891,12 @@ class AppointmentService {
     const slots = [];
 
     // Build a Set of booked slot keys like: "2025-06-02_14:00"
-    const bookedSlotSet = new Set(
+    const bookedSlotStatusMap = new Map(
       dayAppointments.map((apt) => {
         const dateStr = new Date(apt.appointmentDate).toISOString().split('T')[0]; // 'YYYY-MM-DD'
         const timeStr = new Date(apt.startTime).toISOString().split('T')[1].slice(0, 5); // 'HH:mm'
-        return `${dateStr}_${timeStr}`;
+        const slotKey = `${dateStr}_${timeStr}`;
+        return [slotKey, apt.status]; // assuming apt.status contains values like 'booked', 'cancelled', etc.
       })
     );
 
@@ -914,7 +912,9 @@ class AppointmentService {
         if (currentTime <= endTime) {
           const dateStr = date.toISOString().split('T')[0]; // 'YYYY-MM-DD'
           const slotKey = `${dateStr}_${slotStart}`;
-          const isBooked = bookedSlotSet.has(slotKey);
+          
+         const status = bookedSlotStatusMap.get(slotKey);
+          const isBooked = status === APPOINTMENT_STATUS.BOOKED;
 
           slots.push({
             start: slotStart,
@@ -923,7 +923,7 @@ class AppointmentService {
             date: dateStr,
             timeDisplay: `${slotStart} - ${slotEnd}`,
             reason: isBooked ? 'Already booked' : null,
-            blockedBy: isBooked ? 'booked' : null,
+            blockedBy: isBooked ? APPOINTMENT_STATUS.BOOKED : null,
           });
         }
       }
