@@ -653,7 +653,7 @@ class AppointmentService {
    * @param {number} days - Number of days to look back (default: 30)
    * @returns {array} Array of appointments from the last 30 days
    */
-  async getAppointmentHistory(hospitalId, days = 30) {
+  async getAppointmentHistory(hospitalId, days = 7) {
     try {
       if (!hospitalId) {
         throw new Error('Hospital ID is required');
@@ -668,23 +668,34 @@ class AppointmentService {
         return cachedHistory;
       }
 
-      // Calculate date range in IST (last N days)
-      const endDate = TimezoneUtil.getCurrentIst();
-      endDate.setDate(endDate.getDate() - 2); // Include today
-      endDate.setHours(23, 59, 59, 999); // End of today
-      
-      const startDate = TimezoneUtil.getCurrentIst();
-      startDate.setDate(startDate.getDate() - days);
-      startDate.setHours(0, 0, 0, 0); // Start of the day N days ago
+      // Helper functions
+      const getISTStartOfDay = (date) => {
+        const istOffset = 5.5 * 60 * 60000;
+        const utcMidnight = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+        return new Date(utcMidnight + istOffset);
+      };
 
-      // Fetch appointment history
+      const getISTEndOfDay = (date) => {
+        const startOfDay = getISTStartOfDay(date);
+        return new Date(startOfDay.getTime() + 86399999); // 23:59:59.999
+      };
+
+      // Get current IST date
+      const nowIST = new Date(Date.now() + 5.5 * 60 * 60000); // or TimezoneUtil.getCurrentIst()
+
+      // Yesterday's end (up to 23:59:59.999 IST)
+      const endDate = getISTEndOfDay(new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() - 1));
+
+      // 7 days before yesterday's start (i.e., 8 days ago)
+      const startDate = getISTStartOfDay(new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() - days));
+      // Query
       const appointmentHistory = await prisma.appointment.findMany({
         where: {
           hospitalId: hospitalId,
           appointmentDate: {
             gte: startDate,
-            lte: endDate
-          }
+            lte: endDate,
+          },
         },
         include: {
           doctor: {
@@ -692,14 +703,14 @@ class AppointmentService {
               id: true,
               name: true,
               specialization: true,
-              photo: true
-            }
-          }
+              photo: true,
+            },
+          },
         },
         orderBy: [
           { appointmentDate: 'desc' },
-          { startTime: 'desc' }
-        ]
+          { startTime: 'desc' },
+        ],
       });
 
       // Group appointments by status for summary
@@ -707,6 +718,8 @@ class AppointmentService {
         acc[appointment.status] = (acc[appointment.status] || 0) + 1;
         return acc;
       }, {});
+
+      
 
       const result = {
         appointments: appointmentHistory,

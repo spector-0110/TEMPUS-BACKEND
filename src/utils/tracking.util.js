@@ -34,7 +34,7 @@ class TrackingLinkUtil {
    */
   generateTrackingLink(appointmentId, hospitalId, doctorId) {
     const token = this.generateToken(appointmentId, hospitalId, doctorId);
-    return `${process.env.FRONTEND_URL || 'http://localhost:3000'}/track/${token}`;
+    return `${process.env.APPPINTMENT_FRONTEND_URL || 'http://localhost:3000'}/track/${token}`;
   }
 
   /**

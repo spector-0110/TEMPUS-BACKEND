@@ -31,7 +31,7 @@ class AppointmentProcessor {
       });
       
       // Set up consumers
-      await this.setupAppointmentUpdateConsumer();
+      // await this.setupAppointmentUpdateConsumer();
       await this.setupConsumers();
       
       this.initialized = true;
@@ -41,32 +41,32 @@ class AppointmentProcessor {
     }
   }
 
-  async setupAppointmentUpdateConsumer() {
-    await rabbitmqService.consumeQueue('appointment_updates', async (data) => {
-      try {
-        const { appointments, doctor, reason } = data;
+  // async setupAppointmentUpdateConsumer() {
+  //   await rabbitmqService.consumeQueue('appointment_updates', async (data) => {
+  //     try {
+  //       const { appointments, doctor, reason } = data;
         
-        // Group appointments by date for notifications
-        const appointmentsByDate = this.groupAppointmentsByDate(appointments);
+  //       // Group appointments by date for notifications
+  //       const appointmentsByDate = this.groupAppointmentsByDate(appointments);
         
-        // Send consolidated notifications through message service
-        await this.sendNotifications(doctor, appointmentsByDate, reason);
+  //       // Send consolidated notifications through message service
+  //       await this.sendNotifications(doctor, appointmentsByDate, reason);
 
-        // Log success
-        await redisService.setCache(`appointment:update:${Date.now()}`, {
-          status: 'processed',
-          data,
-          timestamp: new Date().toISOString()
-        }, 7 * 24 * 60 * 60);
-      } catch (error) {
-        console.error('Error processing appointment update:', error);
-        throw error;
-      }
-    }, {
-      maxRetries: 3,
-      prefetch: 5
-    });
-  }
+  //       // Log success
+  //       await redisService.setCache(`appointment:update:${Date.now()}`, {
+  //         status: 'processed',
+  //         data,
+  //         timestamp: new Date().toISOString()
+  //       }, 7 * 24 * 60 * 60);
+  //     } catch (error) {
+  //       console.error('Error processing appointment update:', error);
+  //       throw error;
+  //     }
+  //   }, {
+  //     maxRetries: 3,
+  //     prefetch: 5
+  //   });
+  // }
   
   async setupConsumers() {
     // Consumer for appointment created events
