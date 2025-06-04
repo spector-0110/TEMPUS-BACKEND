@@ -191,8 +191,10 @@ class AdvancedQueueService {
         error.code = 'INVALID_FORMAT';
         throw error;
       }
+      const res= await this.getQueueInfo(token, skipCache);
+      console.log('Queue info retrieved successfully:', res);
       
-      return await this.getQueueInfo(token, skipCache);
+      return res;
     } catch (error) {
       console.error('Error getting appointment by tracking token:', error);
       
@@ -315,6 +317,11 @@ class AdvancedQueueService {
     
     // If not in cache, calculate the position
     const startTime = new Date(appointment.startTime);
+    const appointmentDateTime = new Date(appointment.appointmentDate);
+    appointmentDateTime.setHours(startTime.getHours(), startTime.getMinutes(), 0, 0);
+    
+    // Get current time in IST
+    const currentTimeIST = TimezoneUtil.getCurrentIst();
     
     // Find all appointments with the same start time
     const sameTimeAppointments = await prisma.appointment.findMany({
@@ -359,7 +366,23 @@ class AdvancedQueueService {
     
     // Calculate estimated wait time using doctor's avg consultation time if available
     const consultationTime = doctorSchedule?.avgConsultationTime || this.DEFAULT_CONSULTATION_TIME;
-    const estimatedWaitTime = appointmentsAhead * consultationTime;
+    
+    // Calculate time-based wait estimate based on current time vs. appointment time
+    let estimatedWaitTime = 0;
+    
+    // Convert appointment date and start time to a full datetime in IST for comparison
+    // Check if appointment is in the future
+    if (currentTimeIST < appointmentDateTime) {
+      // Calculate minutes until appointment
+      const diffMs = appointmentDateTime.getTime() - currentTimeIST.getTime();
+      const diffMinutes = Math.ceil(diffMs / (1000 * 60));
+      
+      // Add waiting time for patients ahead in queue
+      estimatedWaitTime = diffMinutes + (appointmentsAhead * consultationTime);
+    } else {
+      // If appointment time has already passed, just consider patients ahead
+      estimatedWaitTime = appointmentsAhead * consultationTime;
+    }
 
     // Generate IST wait time string (HH:MM format)
     const waitHours = Math.floor(estimatedWaitTime / 60);
