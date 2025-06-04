@@ -48,7 +48,7 @@ class AdvancedQueueService {
     if (!skipCache) {
       const cachedData = await redisService.get(cacheKey);
       if (cachedData) {
-        return JSON.parse(cachedData);
+        return cachedData;
       }
     }
 
@@ -75,10 +75,10 @@ class AdvancedQueueService {
 
     let appointment;
 
-    appointment = await redisService.get(cacheKey);
+    const cachedAppointment = await redisService.get(cacheKey);
 
     if (appointment) {
-      return JSON.parse(appointment);
+      appointment= cachedAppointment;
     } else {
         appointment = await prisma.appointment.findUnique({
         where: { id: appointmentId },
@@ -89,7 +89,7 @@ class AdvancedQueueService {
                 name: true,
                 specialization: true,
                 experience: true,
-                qualifications: true,
+                qualification: true,
                 photo: true
             }
             },
@@ -178,7 +178,7 @@ class AdvancedQueueService {
    * @param {Date} appointmentDate - The appointment date
    * @returns {Promise<Object|null>} Doctor's schedule for that day with avgConsultationTime
    */
-  async getDoctorDaySchedule(doctorId, appointmentDate) {
+  async getDoctorDaySchedule(doctorId, appointmentDate,hospitalId) {
 
 
     const cachedStats = await redisService.getCache(`hospital:dashboard:${hospitalId}`);
@@ -234,7 +234,7 @@ class AdvancedQueueService {
     // Try to get position from cache first
     const cachedPosition = await redisService.get(positionCacheKey);
     if (cachedPosition) {
-      return JSON.parse(cachedPosition);
+      return cachedPosition;
     }
     
     // If not in cache, calculate the position
@@ -271,7 +271,8 @@ class AdvancedQueueService {
     // Get the doctor's consultation time from their schedule for this day
     const doctorSchedule = await this.getDoctorDaySchedule(
       appointment.doctorId, 
-      appointment.appointmentDate
+      appointment.appointmentDate,
+      appointment.hospitalId
     );
     
     // Calculate estimated wait time using doctor's avg consultation time if available
