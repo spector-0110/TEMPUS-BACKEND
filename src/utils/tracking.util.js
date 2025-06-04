@@ -45,12 +45,35 @@ class TrackingLinkUtil {
    */
   verifyToken(token) {
     try {
-      return jwt.verify(
+      // First check if the token is null, undefined, or not a string
+      if (!token || typeof token !== 'string' || token.trim() === '') {
+        throw new Error('Token is empty or invalid format');
+      }
+      
+      const decodedToken = jwt.verify(
         token, 
         process.env.JWT_SECRET || 'appointment-tracking-secret'
       );
+      
+      // Validate token structure - make sure it has all required fields
+      if (!decodedToken || !decodedToken.appointmentId || !decodedToken.hospitalId || !decodedToken.doctorId) {
+        throw new Error('Token is missing required fields');
+      }
+      
+      return decodedToken;
     } catch (error) {
-      throw new Error('Invalid or expired tracking token');
+      // Preserve the original error type and message
+      if (error.name === 'TokenExpiredError') {
+        console.error('Token expired:', error.message);
+        error.message = 'Tracking token has expired';
+        throw error;
+      } else if (error.name === 'JsonWebTokenError') {
+        console.error('JWT error:', error.message);
+        throw error;
+      } else {
+        console.error('Token verification error:', error.message);
+        throw new Error('Invalid or expired tracking token');
+      }
     }
   }
 }

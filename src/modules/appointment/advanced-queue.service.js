@@ -44,31 +44,51 @@ class AdvancedQueueService {
   async getQueueInfo(token, skipCache = false) {
     const cacheKey = `${this.CACHE_PREFIX.TRACKING}${token}`;
     
-    // Try to get from cache first, unless skipCache is true
-    if (!skipCache) {
-      const cachedData = await redisService.get(cacheKey);
-      if (cachedData) {
-        return cachedData;
+    try {
+      // Try to get from cache first, unless skipCache is true
+      if (!skipCache) {
+        const cachedData = await redisService.get(cacheKey);
+        if (cachedData) {
+          return cachedData;
+        }
       }
+  
+      // If not in cache or skipCache is true, compute it
+      const queueInfo = await this._computeQueueInfo(token);
+      
+      // Cache the result
+      await redisService.set(cacheKey, queueInfo, this.CACHE_TTL.TRACKING);
+      
+      return queueInfo;
+    } catch (error) {
+      // Log Redis-related errors but allow token verification errors to propagate up
+      if (error.message.includes('Redis') || error.message.includes('Circuit breaker')) {
+        console.error('Redis error in getQueueInfo:', error);
+        
+        // If Redis fails, try to compute without using Redis cache
+        return await this._computeQueueInfo(token, true);
+      }
+      
+      // Re-throw other errors
+      throw error;
     }
-
-    // If not in cache or skipCache is true, compute it
-    const queueInfo = await this._computeQueueInfo(token);
-    
-    // Cache the result
-    await redisService.set(cacheKey, JSON.stringify(queueInfo), this.CACHE_TTL.TRACKING);
-    
-    return queueInfo;
   }
 
   /**
    * Compute queue information without caching
    * @param {string} token - The tracking token
+   * @param {boolean} bypassRedis - Whether to bypass Redis operations (used in case of Redis failure)
    * @returns {Promise<Object>} Queue information
    */
-  async _computeQueueInfo(token) {
+  async _computeQueueInfo(token, bypassRedis = false) {
     // Verify and decode the token
-    const { appointmentId, hospitalId, doctorId } = trackingUtil.verifyToken(token);
+    const tokenData = trackingUtil.verifyToken(token);
+    
+    if (!tokenData || !tokenData.appointmentId || !tokenData.hospitalId || !tokenData.doctorId) {
+      throw new Error('Invalid tracking token structure');
+    }
+    
+    const { appointmentId, hospitalId, doctorId } = tokenData;
 
     // Use a proper cache key format consistent with our cache prefix convention
     const cacheKey = `appointment:${appointmentId}`;
@@ -77,8 +97,8 @@ class AdvancedQueueService {
 
     const cachedAppointment = await redisService.get(cacheKey);
 
-    if (appointment) {
-      appointment= cachedAppointment;
+    if (cachedAppointment) {
+      appointment = cachedAppointment;
     } else {
         appointment = await prisma.appointment.findUnique({
         where: { id: appointmentId },
@@ -107,7 +127,7 @@ class AdvancedQueueService {
         
         // Cache the appointment data after retrieving it from the database
         if (appointment) {
-          await redisService.set(cacheKey, JSON.stringify(appointment), this.CACHE_TTL.APPOINTMENTS);
+          await redisService.set(cacheKey, appointment, this.CACHE_TTL.APPOINTMENTS);
         }
     }
 
@@ -165,10 +185,23 @@ class AdvancedQueueService {
    */
   async getAppointmentByTrackingToken(token, skipCache = false) {
     try {
+      // Validate token format first to avoid unnecessary processing
+      if (!token || typeof token !== 'string' || token.trim() === '') {
+        throw new Error('Invalid tracking token format');
+      }
+      
       return await this.getQueueInfo(token, skipCache);
     } catch (error) {
       console.error('Error getting appointment by tracking token:', error);
-      throw new Error('Invalid or expired tracking token');
+      
+      // Provide more specific error message based on the error type
+      if (error.name === 'TokenExpiredError') {
+        throw new Error('Your tracking token has expired. Please request a new one.');
+      } else if (error.name === 'JsonWebTokenError') {
+        throw new Error('Invalid tracking token. Please check the link and try again.');
+      } else {
+        throw new Error('Invalid or expired tracking token');
+      }
     }
   }
 
