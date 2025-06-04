@@ -275,6 +275,10 @@ class HospitalService {
       </div>
     `
   });
+  
+  // Invalidate dashboard cache to reflect the updated hospital details immediately
+  const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
+  await redisService.invalidateCache(CACHE_KEY);
 
   return updatedHospital;
 }
@@ -282,7 +286,7 @@ class HospitalService {
   async getDashboardStats(hospitalId) {
     // Try to get stats from cache first
     const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
-    const CACHE_EXPIRY = 5 * 60; // 5 minutes cache
+    const CACHE_EXPIRY = 600; // 5 minutes cache
     
     try {
       const cachedStats = await redisService.getCache(CACHE_KEY);

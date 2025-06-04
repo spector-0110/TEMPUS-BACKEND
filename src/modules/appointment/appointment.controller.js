@@ -316,107 +316,107 @@ class AppointmentController {
     }
   }
 
-  /**
-   * Track an appointment by token and get queue information
-   */
-  async trackAppointment(req, res) {
-    try {
-      // Validate tracking token
-      const { error } = validator.validateTrackingToken({ token: req.params.token });
-      if (error) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Invalid tracking token',
-          errors: error.details.map(detail => detail.message)
-        });
-      }
+  // /**
+  //  * Track an appointment by token and get queue information
+  //  */
+  // async trackAppointment(req, res) {
+  //   try {
+  //     // Validate tracking token
+  //     const { error } = validator.validateTrackingToken({ token: req.params.token });
+  //     if (error) {
+  //       return res.status(400).json({ 
+  //         success: false, 
+  //         message: 'Invalid tracking token',
+  //         errors: error.details.map(detail => detail.message)
+  //       });
+  //     }
       
-      // Get appointment and queue information by tracking token
-      const trackingInfo = await appointmentService.getAppointmentByTrackingToken(req.params.token);
+  //     // Get appointment and queue information by tracking token
+  //     const trackingInfo = await appointmentService.getAppointmentByTrackingToken(req.params.token);
       
-      return res.status(200).json({
-        success: true,
-        message: 'Appointment and queue information retrieved successfully',
-        data: trackingInfo
-      });
-    } catch (error) {
-      console.error('Error in trackAppointment controller:', error);
+  //     return res.status(200).json({
+  //       success: true,
+  //       message: 'Appointment and queue information retrieved successfully',
+  //       data: trackingInfo
+  //     });
+  //   } catch (error) {
+  //     console.error('Error in trackAppointment controller:', error);
       
-      if (error.message.includes('Invalid or expired')) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Invalid or expired tracking link' 
-        });
-      }
+  //     if (error.message.includes('Invalid or expired')) {
+  //       return res.status(400).json({ 
+  //         success: false, 
+  //         message: 'Invalid or expired tracking link' 
+  //       });
+  //     }
       
-      if (error.message.includes('not found')) {
-        return res.status(404).json({ 
-          success: false, 
-          message: 'Appointment not found',
-          error: error.message
-        });
-      }
+  //     if (error.message.includes('not found')) {
+  //       return res.status(404).json({ 
+  //         success: false, 
+  //         message: 'Appointment not found',
+  //         error: error.message
+  //       });
+  //     }
       
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Failed to track appointment', 
-        error: error.message 
-      });
-    }
-  }
+  //     return res.status(500).json({ 
+  //       success: false, 
+  //       message: 'Failed to track appointment', 
+  //       error: error.message 
+  //     });
+  //   }
+  // }
 
-  /**
-   * Get fresh queue status information by tracking token
-   * This endpoint bypasses the cache to provide the most up-to-date queue information
-   */
-  async refreshQueueStatus(req, res) {
-    try {
-      // Validate tracking token
-      const { error } = validator.validateTrackingToken({ token: req.params.token });
-      if (error) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Invalid tracking token',
-          errors: error.details.map(detail => detail.message)
-        });
-      }
+  // /**
+  //  * Get fresh queue status information by tracking token
+  //  * This endpoint bypasses the cache to provide the most up-to-date queue information
+  //  */
+  // async refreshQueueStatus(req, res) {
+  //   try {
+  //     // Validate tracking token
+  //     const { error } = validator.validateTrackingToken({ token: req.params.token });
+  //     if (error) {
+  //       return res.status(400).json({ 
+  //         success: false, 
+  //         message: 'Invalid tracking token',
+  //         errors: error.details.map(detail => detail.message)
+  //       });
+  //     }
 
-      // First, invalidate any cached tracking data for this token
-      await appointmentService.invalidateTrackingCaches(hospitalId, doctorId);
+  //     // First, invalidate any cached tracking data for this token
+  //     await appointmentService.invalidateTrackingCaches(hospitalId, doctorId);
       
-      // Get fresh appointment and queue information
-      const trackingInfo = await appointmentService.getAppointmentByTrackingToken(req.params.token, true);
+  //     // Get fresh appointment and queue information
+  //     const trackingInfo = await appointmentService.getAppointmentByTrackingToken(req.params.token, true);
       
-      return res.status(200).json({
-        success: true,
-        message: 'Queue information refreshed successfully',
-        data: trackingInfo
-      });
-    } catch (error) {
-      console.error('Error in refreshQueueStatus controller:', error);
+  //     return res.status(200).json({
+  //       success: true,
+  //       message: 'Queue information refreshed successfully',
+  //       data: trackingInfo
+  //     });
+  //   } catch (error) {
+  //     console.error('Error in refreshQueueStatus controller:', error);
       
-      if (error.message.includes('Invalid or expired')) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Invalid or expired tracking link' 
-        });
-      }
+  //     if (error.message.includes('Invalid or expired')) {
+  //       return res.status(400).json({ 
+  //         success: false, 
+  //         message: 'Invalid or expired tracking link' 
+  //       });
+  //     }
       
-      if (error.message.includes('not found')) {
-        return res.status(404).json({ 
-          success: false, 
-          message: 'Appointment not found',
-          error: error.message
-        });
-      }
+  //     if (error.message.includes('not found')) {
+  //       return res.status(404).json({ 
+  //         success: false, 
+  //         message: 'Appointment not found',
+  //         error: error.message
+  //       });
+  //     }
       
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Failed to refresh queue status', 
-        error: error.message 
-      });
-    }
-  }
+  //     return res.status(500).json({ 
+  //       success: false, 
+  //       message: 'Failed to refresh queue status', 
+  //       error: error.message 
+  //     });
+  //   }
+  // }
 
 
   async getHospitalDetailsBySubdomainForAppointment(req, res) { 
@@ -454,6 +454,7 @@ class AppointmentController {
       });
     }
    }
+
 }
 
 

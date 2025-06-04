@@ -1,11 +1,10 @@
 const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const rabbitmqService = require('../../services/rabbitmq.service');
-const messageService = require('../notification/message.service');
 const trackingUtil = require('../../utils/tracking.util');
 const TimezoneUtil = require('../../utils/timezone.util');
-const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS, CACHE, QUEUES ,APPOINTMENT_PAYMENT_METHOD} = require('./appointment.constants');
-
+const { APPOINTMENT_STATUS, APPOINTMENT_PAYMENT_STATUS, CACHE, QUEUES } = require('./appointment.constants');
+const queueService = require('./advanced-queue.service');
 /**
  * Service layer for appointment-related operations
  */
@@ -20,18 +19,24 @@ class AppointmentService {
       console.log('Creating appointment with data:', JSON.stringify(appointmentData, null, 2));
       const appointment = await prisma.appointment.create({
         data: {
-          hospitalId: appointmentData.hospitalId,
-          doctorId: appointmentData.doctorId,
           patientName: appointmentData.patientName,
           mobile: appointmentData.mobile,
           createdAt:TimezoneUtil.getCurrentIst(),
           age: appointmentData.age,
           appointmentDate: new Date(appointmentData.appointmentDate),
+
           startTime: appointmentData.startTime ? new Date(`1970-01-01T${appointmentData.startTime}:00`) : null,
           endTime: appointmentData.endTime ? new Date(`1970-01-01T${appointmentData.endTime}:00`) : null,
           status: APPOINTMENT_STATUS.BOOKED,
           paymentStatus: appointmentData.paymentStatus ? appointmentData.paymentStatus : APPOINTMENT_PAYMENT_STATUS.UNPAID,
           paymentMethod: appointmentData.paymentMethod ? appointmentData.paymentMethod : null,
+          paymentAt: null,
+          hospital: {
+            connect: { id: appointmentData.hospitalId }
+          },
+          doctor: {
+            connect: { id: appointmentData.doctorId }
+          }
         },
         include: {
           hospital: true,
@@ -109,6 +114,9 @@ class AppointmentService {
     
     // Update cache
     await this.cacheAppointment(appointment);
+
+    await queueService.publishQueueUpdate(hospitalId, doctorId, appointment.appointmentDate);
+
     
     // Invalidate tracking caches to ensure fresh queue data
     await this.invalidateTrackingCaches(appointment.hospitalId, appointment.doctorId);
@@ -130,6 +138,8 @@ class AppointmentService {
     const updateData = {};
     if (paymentStatus) updateData.paymentStatus = paymentStatus;
     if (paymentMethod) updateData.paymentMethod = paymentMethod;
+    
+    updateData.paymentAt = TimezoneUtil.getCurrentIst(); // Set payment time to current IST time
 
     // Update the appointment
     const appointment = await prisma.appointment.update({
@@ -143,6 +153,8 @@ class AppointmentService {
     
     // Update cache
     await this.cacheAppointment(appointment);
+
+    await queueService.publishQueueUpdate(hospitalId, doctorId, appointment.appointmentDate);
     
     // Publish to the appointment updated queue
     await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
@@ -274,8 +286,7 @@ class AppointmentService {
     const appointment = await this.getAppointmentById(appointmentId);
     
     // Only allow deletion if appointment is booked and not in the past (using IST)
-    if (appointment.status !== APPOINTMENT_STATUS.BOOKED || 
-        new Date(appointment.appointmentDate) < TimezoneUtil.getCurrentIst()) {
+    if (appointment.status !== APPOINTMENT_STATUS.BOOKED ) {
       throw new Error('Cannot delete appointment that is not in booked status or is in the past');
     }
     
@@ -297,141 +308,11 @@ class AppointmentService {
   }
   
   /**
-   * Get appointment and queue information by tracking token
-   * @param {string} token - The tracking token
-   * @param {boolean} skipCache - Whether to bypass cache and get fresh data
-   */
-  async getAppointmentByTrackingToken(token, skipCache = false) {
-    try {
-      // Verify and decode the token
-      const { appointmentId, hospitalId, doctorId } = trackingUtil.verifyToken(token);
-      
-      // Check if we have cached queue data (short TTL for freshness)
-      const todayIST = TimezoneUtil.getCurrentIst();
-      todayIST.setHours(0, 0, 0, 0); // Start of day
-      const todayStr = todayIST.toISOString().split('T')[0]; // YYYY-MM-DD format
-      const trackingCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${todayStr}:${appointmentId}`;
-      
-      if (!skipCache) {
-        const cachedTracking = await redisService.getCache(trackingCacheKey);
-        
-        if (cachedTracking) {
-          return cachedTracking;
-        }
-      }
-      
-      // Get the current appointment
-      const appointment = await this.getAppointmentById(appointmentId);
-      
-      if (!appointment) {
-        throw new Error(`Appointment not found: ${appointmentId}`);
-      }
-      
-      // Get today's appointments for the same doctor to build the queue using IST
-      const todayDate = TimezoneUtil.getCurrentIst();
-      todayDate.setHours(0, 0, 0, 0); // Start of day
-      
-      // Use a short cache for today's appointments
-      const queueCacheKey = `tracking:queue:${hospitalId}:${doctorId}:${todayStr}`;
-      let todayAppointments = await redisService.getCache(queueCacheKey);
-      
-      if (!todayAppointments) {
-        todayAppointments = await prisma.appointment.findMany({
-          where: {
-            hospitalId: hospitalId,
-            doctorId: doctorId,
-            appointmentDate: todayDate,
-            status: {
-              in: [APPOINTMENT_STATUS.BOOKED, APPOINTMENT_STATUS.COMPLETED]
-            }
-          },
-          select: {
-            id: true,
-            patientName: true,
-            startTime: true,
-            status: true,
-            appointmentDate: true
-          },
-          orderBy: [
-            { startTime: 'asc' }
-          ]
-        });
-        
-        // Cache for 300  seconds to ensure fresh data but prevent hammering database
-        await redisService.setCache(queueCacheKey, todayAppointments, 300);
-      }
-      
-      // Find current appointment position in queue
-      let queuePosition = 0;
-      let appointmentsAhead = 0;
-      let isPatientTurn = false;
-      
-      const queueInfo = todayAppointments.map((apt, index) => {
-        const formattedTime = apt.startTime
-          ? new Date(apt.startTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-          : 'Not specified';
-          
-        if (apt.id === appointmentId) {
-          queuePosition = index + 1;
-          isPatientTurn = index === 0 && apt.status === APPOINTMENT_STATUS.BOOKED;
-        } else if (apt.status === APPOINTMENT_STATUS.BOOKED && queuePosition === 0) {
-          appointmentsAhead++;
-        }
-        
-        // Only return the minimal required information
-        return {
-          isCurrentAppointment: apt.id === appointmentId,
-          patientName: apt.id === appointmentId ? apt.patientName : `Patient ${index + 1}`, // Only show full name for own appointment
-          time: formattedTime,
-          status: apt.status
-        };
-      });
-      
-      // Create a simplified appointment response with only necessary info
-      const trackingInfo = {
-        appointment: {
-          id: appointment.id,
-          patientName: appointment.patientName,
-          appointmentDate: appointment.appointmentDate,
-          startTime: appointment.startTime,
-          status: appointment.status,
-          paymentStatus: appointment.paymentStatus
-        },
-        doctor: {
-          name: appointment.doctor.name,
-          specialization: appointment.doctor.specialization,
-          photo: appointment.doctor.photo
-        },
-        hospital: {
-          name: appointment.hospital.name,
-          logo: appointment.hospital.logo,
-          themeColor: appointment.hospital.themeColor || '#2563EB'
-        },
-        queue: {
-          position: queuePosition,
-          appointmentsAhead: appointmentsAhead,
-          isPatientTurn: isPatientTurn,
-          totalAppointmentsToday: todayAppointments.length,
-          appointments: queueInfo
-        },
-        refreshedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
-      };
-      
-      // Cache the tracking result for 60 seconds
-      await redisService.setCache(trackingCacheKey, trackingInfo, 60);
-      
-      return trackingInfo;
-    } catch (error) {
-      console.error('Error decoding tracking token:', error);
-      throw new Error('Invalid or expired tracking token');
-    }
-  }
-  
-  /**
    * Cache an appointment
    */
   async cacheAppointment(appointment,hospitalId) {
     const cacheKey = `${CACHE.APPOINTMENT_PREFIX}${appointment.id}`;
+    
 
     // Cache the individual appointment
     await redisService.setCache(cacheKey, appointment, CACHE.APPOINTMENT_TTL);
@@ -439,37 +320,6 @@ class AppointmentService {
     // Invalidate all related caches when appointment data changes
     
     return appointment;
-  }
-
-
-  
-  /**
-   * Generate a tracking link for an appointment
-   */
-  generateTrackingLink(appointmentId, hospitalId, doctorId) {
-    return trackingUtil.generateTrackingLink(appointmentId, hospitalId, doctorId);
-  }
-  
-  
-  /**
-   * Invalidate tracking caches for a hospital and doctor
-   */
-  async invalidateTrackingCaches(hospitalId, doctorId) {
-    try {
-      // Clear any doctor/hospital specific caches using IST
-      const todayIST = TimezoneUtil.getCurrentIst();
-      todayIST.setHours(0, 0, 0, 0);
-      const todayStr = todayIST.toISOString().split('T')[0]; // YYYY-MM-DD format
-      const cachePatterns = [
-        `tracking:queue:${hospitalId}:${doctorId}:${todayIST}*`
-      ];
-      
-      for (const pattern of cachePatterns) {
-        await redisService.deleteByPattern(pattern);
-      }
-    } catch (error) {
-      console.error('Error invalidating tracking caches:', error);
-    }
   }
   
   /**
@@ -500,51 +350,6 @@ class AppointmentService {
     return allowedTransitions[currentStatus]?.includes(newStatus) || false;
   }
   
-  /**
-   * Calculate estimated waiting time based on appointment queue position and doctor's avg consultation time
-   * @param {string} hospitalId - Hospital ID
-   * @param {string} doctorId - Doctor ID
-   * @param {number} appointmentsAhead - Number of appointments ahead in queue
-   * @returns {object} Estimated waiting time in minutes
-   */
-  async calculateEstimatedWaitingTime(hospitalId, doctorId, appointmentsAhead) {
-    try {
-      // Default consultation time (15 minutes) if doctor's schedule not found
-      let avgConsultationTime = 15;
-      
-      // Get doctor's schedule to find consultation time using IST day of week
-      const doctorSchedule = await prisma.doctorSchedule.findFirst({
-        where: {
-          doctorId: doctorId,
-          hospitalId: hospitalId,
-          status: 'active',
-          dayOfWeek: TimezoneUtil.getCurrentIst().getDay() // Today's day of week in IST (0=Sunday, 6=Saturday)
-        }
-      });
-      
-      if (doctorSchedule?.avgConsultationTime) {
-        avgConsultationTime = doctorSchedule.avgConsultationTime;
-      }
-      
-      // Calculate estimated waiting time
-      const estimatedMinutes = appointmentsAhead * avgConsultationTime;
-      const waitHours = Math.floor(estimatedMinutes / 60);
-      const waitMinutes = estimatedMinutes % 60;
-      
-      return {
-        estimatedMinutes,
-        formattedTime: waitHours > 0 ? 
-          `${waitHours} hour${waitHours > 1 ? 's' : ''} ${waitMinutes} minute${waitMinutes !== 1 ? 's' : ''}` : 
-          `${waitMinutes} minute${waitMinutes !== 1 ? 's' : ''}`
-      };
-    } catch (error) {
-      console.error('Error calculating estimated waiting time:', error);
-      return {
-        estimatedMinutes: appointmentsAhead * 15, // Default to 15 minutes per appointment
-        formattedTime: `${appointmentsAhead * 15} minutes (estimated)`
-      };
-    }
-  }
 
   /**
    * Get today's and tomorrow's appointments for a hospital
@@ -750,7 +555,6 @@ class AppointmentService {
   //  * @param {string} subdomain - The hospital's subdomain
   //  * @returns {Promise<Object>} Hospital details with doctor availability
   //  */
-
   async getHospitalDetailsBySubdomainForAppointment(subdomain) {
   try {
     const cacheKey = `hospital:public:${subdomain}`;
@@ -902,40 +706,59 @@ class AppointmentService {
     }
 
     const slots = [];
+    const HOUR_IN_MINUTES = 60;
+    
+    // Create a map of hour slots and their appointments
+    const appointmentsByHour = new Map();
 
-    // Build a Set of booked slot keys like: "2025-06-02_14:00"
-    const bookedSlotSet = new Set(
-      dayAppointments.map((apt) => {
-        const dateStr = new Date(apt.appointmentDate).toISOString().split('T')[0]; // 'YYYY-MM-DD'
-        const timeStr = new Date(apt.startTime).toISOString().split('T')[1].slice(0, 5); // 'HH:mm'
-        return `${dateStr}_${timeStr}`;
-      })
-    );
+    // Group appointments by hour slot
+    dayAppointments.forEach((apt) => {
+      const dateStr = new Date(apt.appointmentDate).toISOString().split('T')[0];
+      const hour = new Date(apt.startTime).getHours();
+      const slotKey = `${dateStr}_${String(hour).padStart(2, '0')}:00`;
+      
+      if (!appointmentsByHour.has(slotKey)) {
+        appointmentsByHour.set(slotKey, []);
+      }
+      appointmentsByHour.get(slotKey).push(apt);
+    });
+
+    // Calculate max capacity for a one-hour slot based on avgConsultationTime
+    const slotMaxCapacity = Math.floor(HOUR_IN_MINUTES / schedule.avgConsultationTime);
 
     for (const range of schedule.timeRanges) {
       let currentTime = new Date(`1970-01-01T${range.start}:00`);
       const endTime = new Date(`1970-01-01T${range.end}:00`);
 
       while (currentTime < endTime) {
-        const slotStart = currentTime.toTimeString().slice(0, 5); // 'HH:mm'
-        currentTime = new Date(currentTime.getTime() + schedule.avgConsultationTime * 60000);
-        const slotEnd = currentTime.toTimeString().slice(0, 5);
+        const slotStart = currentTime.toTimeString().slice(0, 5);
+        const nextHour = new Date(currentTime.getTime() + HOUR_IN_MINUTES * 60000);
+        const slotEnd = nextHour <= endTime ? 
+          nextHour.toTimeString().slice(0, 5) : 
+          range.end;
 
-        if (currentTime <= endTime) {
-          const dateStr = date.toISOString().split('T')[0]; // 'YYYY-MM-DD'
-          const slotKey = `${dateStr}_${slotStart}`;
-          const isBooked = bookedSlotSet.has(slotKey);
-          
-          slots.push({
-            start: slotStart,
-            end: slotEnd,
-            available: !isBooked,
-            date: dateStr,
-            timeDisplay: `${slotStart} - ${slotEnd}`,
-            reason: isBooked ? 'Already booked' : null,
-            blockedBy: isBooked ? 'booked' : null,
-          });
-        }
+        const dateStr = date.toISOString().split('T')[0];
+        const slotKey = `${dateStr}_${slotStart}`;
+        
+        // Get appointments in this slot
+        const appointmentsInSlot = appointmentsByHour.get(slotKey) || [];
+        const patientCount = appointmentsInSlot.length;
+        const isAvailable = patientCount < slotMaxCapacity;
+
+        slots.push({
+          start: slotStart,
+          end: slotEnd,
+          available: isAvailable,
+          date: dateStr,
+          timeDisplay: `${slotStart} - ${slotEnd}`,
+          reason: !isAvailable ? 'Slot is fully booked' : null,
+          blockedBy: !isAvailable ? 'capacity' : null,
+          patientCount,
+          maxCapacity: slotMaxCapacity
+        });
+
+        // Move to next hour or end of range
+        currentTime = nextHour <= endTime ? nextHour : endTime;
       }
     }
 

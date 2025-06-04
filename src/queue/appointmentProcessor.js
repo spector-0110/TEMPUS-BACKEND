@@ -3,6 +3,7 @@ const redisService = require('../services/redis.service');
 const messageService = require('../modules/notification/message.service');
 const TimezoneUtil = require('../utils/timezone.util');
 const { QUEUES, APPOINTMENT_STATUS,APPOINTMENT_PAYMENT_STATUS } = require('../modules/appointment/appointment.constants');
+const appointmentService = require('../modules/appointment/appointment.service');
 
 class AppointmentProcessor {
   constructor() {
@@ -133,23 +134,22 @@ class AppointmentProcessor {
       let notificationContent = '';
       
       if (appointment.status === APPOINTMENT_STATUS.CANCELLED) {
-        notificationContent = `Your appointment with Dr. ${appointment.doctor.name} on ${new Date(appointment.appointmentDate).toLocaleDateString()} has been cancelled.`;
+        notificationContent = `Your appointment with Dr. ${appointment.doctor.name} has been cancelled.`;
       } else if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
-        notificationContent = `Thank you for visiting ${appointment.hospital.name}. Your appointment with Dr. ${appointment.doctor.name} has been marked as completed.`;
+        notificationContent = `Thank you for visiting Dr. ${appointment.doctor.name}. We hope you had a good experience.`;
         
-        // Optional Notify next patient in queue if there is one
-        // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+        // Update queue positions after completion
+        await appointmentService.updateQueuePositions(
+          appointment.hospitalId,
+          appointment.doctorId,
+          appointment.appointmentDate
+        );
 
-      } else if (appointment.status === APPOINTMENT_STATUS.MISSED) {
-        notificationContent = `You missed your appointment with Dr. ${appointment.doctor.name} at ${appointment.hospital.name} on ${new Date(appointment.appointmentDate).toLocaleDateString()}.`;
-        
-        // Optional Notify next patient in queue if there is one
-        // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
-
+        // Notify next patient
+        await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
       }
       
       if (notificationContent) {
-        // Queue notification
         await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
           appointmentId: appointment.id,
           name: appointment.patientName,
@@ -160,18 +160,20 @@ class AppointmentProcessor {
       }
       
       // Clear any tracking caches to ensure data is fresh
+      await this.invalidateAppointmentCaches(appointment);
+
     } catch (error) {
       console.error('Error handling status change:', error);
     }
   }
-  
+
   /**
    * Notify the next patient in the queue when their turn is approaching
    */
   async notifyNextPatientInQueue(hospitalId, doctorId) {
     try {
-      // Get today's date
-      const today = new Date();
+      // Get today's date in IST
+      const today = TimezoneUtil.getCurrentIst();
       today.setHours(0, 0, 0, 0);
       
       // Find next booked appointment
@@ -195,16 +197,20 @@ class AppointmentProcessor {
           }
         },
         orderBy: [
-          { startTime: 'asc' }
+          { paymentAt: 'asc' },
+          { createdAt: 'asc' }
         ]
       });
       
       if (nextAppointment) {
-        // Send notification that it's almost their turn
-        const notificationContent = `It's almost your turn! Your appointment with Dr. ${nextAppointment.doctor.name} at ${nextAppointment.hospital.name} is coming up next. Please make your way to the clinic if you aren't already there.`;
+        // Get their current queue position
+        const queueInfo = await appointmentService.getQueuePosition(nextAppointment.id);
+        
+        const notificationContent = `It's almost your turn! You are ${queueInfo.position === 1 ? 'next' : `${queueInfo.position}th`} in line to see Dr. ${nextAppointment.doctor.name}. Estimated waiting time: ${queueInfo.estimatedWaitingTime} minutes.`;
         
         await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
           appointmentId: nextAppointment.id,
+          name: nextAppointment.patientName,
           mobile: nextAppointment.mobile,
           hospitalId: nextAppointment.hospitalId,
           content: notificationContent

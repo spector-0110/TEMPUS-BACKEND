@@ -4,9 +4,7 @@ const verifySignature=require('../middleware/public-auth.middleware');
 const appointmentController = require('../modules/appointment/appointment.controller');
 const router = express.Router();
 
-// Public endpoints
-router.get('/track/:token',appointmentController.trackAppointment);
-router.get('/refresh-queue/:token', appointmentController.refreshQueueStatus); // For real-time queue updates
+// // Public endpoints
 router.get('/details/:subdomain',verifySignature, appointmentController.getHospitalDetailsBySubdomainForAppointment);
 
 // Patient endpoints - no auth required for patient to create/manage their own appointments

@@ -435,6 +435,7 @@ class SubscriptionService {
 
     // Clear cache after successful update
     await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
+    await redisService.invalidateCache(`hospital:dashboard:${hospitalId}`);
 
     // Send email notification
     await this.sendSubscriptionEmail(updatedSubscription, 'Renewed', hospital);
@@ -483,6 +484,8 @@ class SubscriptionService {
 
       // Cache invalidation should happen after successful transaction
       await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + hospitalId);
+      await redisService.invalidateCache(`hospital:dashboard:${hospitalId}`);
+
 
       return updatedSubscription;
     });
@@ -503,6 +506,7 @@ class SubscriptionService {
 
     // Invalidate cache
     await redisService.invalidateCache(CACHE_KEYS.HOSPITAL_SUBSCRIPTION + subscription.hospitalId);
+    await redisService.invalidateCache(`hospital:dashboard:${hospitalId}`);
 
     return updatedSubscription;
   }

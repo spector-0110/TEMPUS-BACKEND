@@ -11,6 +11,7 @@ const hospitalRoutes = require('./src/routes/hospital.routes');
 const doctorRoutes = require('./src/routes/doctor.routes');
 const appointmentRoutes = require('./src/routes/appointment.route');
 const appointmentProcessor = require('./src/queue/appointmentProcessor');
+const websocketService = require('./src/services/websocket.service');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -165,7 +166,8 @@ async function shutdown(signal) {
     redis: false,
     rabbitmq: false,
     database: false,
-    cron: false
+    cron: false,
+    websocket: false
   };
 
   // Set a timeout for shutdown
@@ -189,6 +191,12 @@ async function shutdown(signal) {
     subscriptionCronService.stopCronJobs();
     shutdownStatus.cron = true;
     console.log('Cron jobs stopped');
+
+    // Stop WebSocket service
+    console.log('Stopping WebSocket service...');
+    await websocketService.cleanup();
+    shutdownStatus.websocket = true;
+    console.log('WebSocket service stopped');
 
     // Cleanup services in parallel with individual timeouts
     await Promise.all([
@@ -248,10 +256,19 @@ async function startServer() {
     subscriptionCronService.startCronJobs();
     // Initialize appointment processor
     await appointmentProcessor.initialize();
-    server = app.listen(PORT, () => {
+    
+    server = app.listen(PORT, async () => {
       console.log(`Server running on http://localhost:${PORT}`);
       console.log('✅ Subscription cron jobs started');
       console.log('✅ Appointment processor initialized');
+      
+      // Initialize WebSocket service
+      try {
+        await websocketService.initialize(server);
+        console.log('✅ WebSocket service initialized');
+      } catch (error) {
+        console.error('❌ Failed to initialize WebSocket service:', error);
+      }
 
 
       // Log service configuration

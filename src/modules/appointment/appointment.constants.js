@@ -1,4 +1,3 @@
-
 // Appointment statuses matching the Prisma schema
 const APPOINTMENT_STATUS = {
   BOOKED: 'booked',
@@ -47,6 +46,15 @@ const TRACKING_LINK = {
   ALGORITHM: 'HS256' // JWT algorithm
 };
 
+// Queue tracking configuration
+const QUEUE_TRACKING = {
+  DEFAULT_CONSULTATION_TIME: 60, // minutes
+  CACHE_PREFIX: 'queue:',
+  POSITION_TTL: 300, // 5 minutes cache for queue positions
+  UPDATE_CHANNEL: 'queue_updates',
+  MAX_EARLY_ARRIVAL: 120 // minutes - how early can a patient arrive
+};
+
 module.exports = {
   APPOINTMENT_STATUS,
   APPOINTMENT_PAYMENT_STATUS,
@@ -54,5 +62,6 @@ module.exports = {
   CACHE,
   QUEUES,
   TRACKING_LINK,
-  APPOINTMENT_PAYMENT_METHOD
+  APPOINTMENT_PAYMENT_METHOD,
+  QUEUE_TRACKING
 };
