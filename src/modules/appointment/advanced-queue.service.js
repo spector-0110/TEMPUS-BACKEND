@@ -187,50 +187,93 @@ class AdvancedQueueService {
     try {
       // Validate token format first to avoid unnecessary processing
       if (!token || typeof token !== 'string' || token.trim() === '') {
-        throw new Error('Invalid tracking token format');
+        const error = new Error('Invalid tracking token format');
+        error.code = 'INVALID_FORMAT';
+        throw error;
       }
       
       return await this.getQueueInfo(token, skipCache);
     } catch (error) {
       console.error('Error getting appointment by tracking token:', error);
       
-      // Provide more specific error message based on the error type
+      // Preserve original error and add code for better client handling
+      const enhancedError = new Error(error.message || 'Invalid or expired tracking token');
+      
+      // Provide more specific error message and code based on error type
       if (error.name === 'TokenExpiredError') {
-        throw new Error('Your tracking token has expired. Please request a new one.');
+        enhancedError.message = 'Your tracking token has expired. Please request a new one.';
+        enhancedError.code = 'TOKEN_EXPIRED';
       } else if (error.name === 'JsonWebTokenError') {
-        throw new Error('Invalid tracking token. Please check the link and try again.');
+        enhancedError.message = 'Invalid tracking token. Please check the link and try again.';
+        enhancedError.code = 'INVALID_TOKEN';
+      } else if (error.code) {
+        enhancedError.code = error.code;
       } else {
-        throw new Error('Invalid or expired tracking token');
+        enhancedError.code = 'TOKEN_ERROR';
       }
+      
+      throw enhancedError;
     }
   }
 
   /**
    * Get the doctor's schedule for a specific day
    * @param {string} doctorId - The doctor's ID
-   * @param {Date} appointmentDate - The appointment date
+   * @param {Date|string} appointmentDate - The appointment date (Date object or ISO string)
+   * @param {string} hospitalId - The hospital's ID
    * @returns {Promise<Object|null>} Doctor's schedule for that day with avgConsultationTime
    */
-  async getDoctorDaySchedule(doctorId, appointmentDate,hospitalId) {
+  async getDoctorDaySchedule(doctorId, appointmentDate, hospitalId) {
+    // Ensure appointmentDate is a valid Date object
+    let dateObj;
+    try {
+      if (!(appointmentDate instanceof Date)) {
+        // Convert string to Date if it's not already a Date object
+        dateObj = new Date(appointmentDate);
+        if (isNaN(dateObj.getTime())) {
+          throw new Error('Invalid date format');
+        }
+      } else {
+        dateObj = appointmentDate;
+      }
+    } catch (error) {
+      console.error('Invalid appointmentDate:', appointmentDate, error);
+      throw new Error(`Invalid appointment date format: ${appointmentDate}`);
+    }
 
-
-    const cachedStats = await redisService.getCache(`hospital:dashboard:${hospitalId}`);
-    if (cachedStats) {
+    try {
+      // Use get instead of getCache (which doesn't exist in the redisService)
+      const cachedStats = await redisService.get(`hospital:dashboard:${hospitalId}`);
+      if (cachedStats) {
         const data = typeof cachedStats === 'string' ? JSON.parse(cachedStats) : cachedStats;
         const doctor = data?.doctors?.find((doctor) => doctor.id === doctorId);
-        const doctorSchedule = doctor?.schedules[appointmentDate.getDay()];
-        const { id, ...doctorScheduleData } = doctorSchedule || {};
-        return doctorScheduleData;
+        if (doctor && doctor.schedules && Array.isArray(doctor.schedules) && doctor.schedules.length > dateObj.getDay()) {
+          const doctorSchedule = doctor.schedules[dateObj.getDay()];
+          if (doctorSchedule) {
+            const { id, ...doctorScheduleData } = doctorSchedule;
+            return doctorScheduleData;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error getting cached hospital dashboard data:', error);
+      // Continue to fallback method if cache retrieval fails
     }
     
-    const dayOfWeek = appointmentDate.getDay(); // 0-6, 0 is Sunday
-    const dateString = appointmentDate.toISOString().split('T')[0];
+    const dayOfWeek = dateObj.getDay(); // 0-6, 0 is Sunday
+    const dateString = dateObj.toISOString().split('T')[0];
     const cacheKey = `${this.CACHE_PREFIX.DOCTOR_DAY_SCHEDULE}${doctorId}:${dateString}:schedule`;
     
     // Try to get from cache first
-    const cachedSchedule = await redisService.get(cacheKey);
-    if (cachedSchedule) {
-      return JSON.parse(cachedSchedule);
+    try {
+      const cachedSchedule = await redisService.get(cacheKey);
+      if (cachedSchedule) {
+        // Redis service already parses JSON, no need to parse again
+        return cachedSchedule;
+      }
+    } catch (error) {
+      console.warn(`Error retrieving cached schedule for doctor ${doctorId}:`, error.message);
+      // Continue to database lookup if cache retrieval fails
     }
 
     // Query for doctor's schedule for this day of week
@@ -247,9 +290,9 @@ class AdvancedQueueService {
       }
     });
 
-    // Cache the result
+    // Cache the result - redisService.set already handles JSON.stringify
     if (schedule) {
-      await redisService.set(cacheKey, JSON.stringify(schedule), this.CACHE_TTL.DOCTOR_SCHEDULE);
+      await redisService.set(cacheKey, schedule, this.CACHE_TTL.DOCTOR_SCHEDULE);
     }
     
     return schedule;
@@ -302,11 +345,17 @@ class AdvancedQueueService {
     const appointmentsAhead = appointmentIndex;
     
     // Get the doctor's consultation time from their schedule for this day
-    const doctorSchedule = await this.getDoctorDaySchedule(
-      appointment.doctorId, 
-      appointment.appointmentDate,
-      appointment.hospitalId
-    );
+    let doctorSchedule;
+    try {
+      doctorSchedule = await this.getDoctorDaySchedule(
+        appointment.doctorId, 
+        appointment.appointmentDate,
+        appointment.hospitalId
+      );
+    } catch (error) {
+      console.warn('Error fetching doctor schedule, using default consultation time:', error.message);
+      doctorSchedule = null;
+    }
     
     // Calculate estimated wait time using doctor's avg consultation time if available
     const consultationTime = doctorSchedule?.avgConsultationTime || this.DEFAULT_CONSULTATION_TIME;
@@ -345,8 +394,8 @@ class AdvancedQueueService {
       isPatientTurn: position === 1
     };
 
-    // Cache the position result
-    await redisService.set(positionCacheKey, JSON.stringify(result), this.CACHE_TTL.QUEUE_POSITION);
+    // Cache the position result - redisService.set already handles JSON.stringify
+    await redisService.set(positionCacheKey, result, this.CACHE_TTL.QUEUE_POSITION);
 
     return result;
   }
@@ -365,9 +414,15 @@ class AdvancedQueueService {
     const cacheKey = `${this.CACHE_PREFIX.TIME_SLOT}${hospitalId}:${doctorId}:${dateString}:${timeString}`;
     
     // Try to get from cache first
-    const cachedAppointments = await redisService.get(cacheKey);
-    if (cachedAppointments) {
-      return JSON.parse(cachedAppointments);
+    try {
+      const cachedAppointments = await redisService.get(cacheKey);
+      if (cachedAppointments) {
+        // Redis service already handles JSON parsing
+        return cachedAppointments;
+      }
+    } catch (error) {
+      console.warn('Error retrieving cached appointments:', error.message);
+      // Continue to database lookup if cache retrieval fails
     }
 
     const appointments = await prisma.appointment.findMany({
@@ -386,8 +441,8 @@ class AdvancedQueueService {
       ]
     });
 
-    // Cache the result
-    await redisService.set(cacheKey, JSON.stringify(appointments), this.CACHE_TTL.APPOINTMENTS);
+    // Cache the result - redisService.set already handles JSON.stringify
+    await redisService.set(cacheKey, appointments, this.CACHE_TTL.APPOINTMENTS);
     
     return appointments;
   }
