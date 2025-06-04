@@ -192,8 +192,6 @@ class AdvancedQueueService {
         throw error;
       }
       const res= await this.getQueueInfo(token, skipCache);
-      console.log('Queue info retrieved successfully:', res);
-      
       return res;
     } catch (error) {
       console.error('Error getting appointment by tracking token:', error);
@@ -331,7 +329,7 @@ class AdvancedQueueService {
         appointmentDate: appointment.appointmentDate,
         startTime: startTime,
         status: {
-          in: [APPOINTMENT_STATUS.BOOKED, APPOINTMENT_STATUS.COMPLETED]
+          in: [APPOINTMENT_STATUS.BOOKED]
         }
       },
       orderBy: [
