@@ -453,10 +453,10 @@ class AppointmentService {
 }
 
   /**
-   * Get appointment history for the last 30 days for a hospital
+   * Get appointment history for past days for a hospital (excluding today)
    * @param {string} hospitalId - Hospital ID
-   * @param {number} days - Number of days to look back (default: 30)
-   * @returns {array} Array of appointments from the last 30 days
+   * @param {number} days - Number of days to look back, excluding today (default: 7)
+   * @returns {object} Object containing appointments and summary from the specified past days
    */
   async getAppointmentHistory(hospitalId, days = 7) {
     try {
@@ -473,33 +473,23 @@ class AppointmentService {
         return cachedHistory;
       }
 
-      // Helper functions
-      const getISTStartOfDay = (date) => {
-        const istOffset = 5.5 * 60 * 60000;
-        const utcMidnight = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-        return new Date(utcMidnight + istOffset);
-      };
+      // Get current IST date using utility
+      const nowIST = TimezoneUtil.getCurrentIst();
 
-      const getISTEndOfDay = (date) => {
-        const startOfDay = getISTStartOfDay(date);
-        return new Date(startOfDay.getTime() + 86399999); // 23:59:59.999
-      };
+      const yesterday = new Date(nowIST);
+      yesterday.setDate(yesterday.getDate() - 1);
+    
+      const sevenDaysAgo = new Date(nowIST);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      // Get current IST date
-      const nowIST = new Date(Date.now() + 5.5 * 60 * 60000); // or TimezoneUtil.getCurrentIst()
 
-      // Yesterday's end (up to 23:59:59.999 IST)
-      const endDate = getISTEndOfDay(new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() - 1));
-
-      // 7 days before yesterday's start (i.e., 8 days ago)
-      const startDate = getISTStartOfDay(new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() - days));
       // Query
       const appointmentHistory = await prisma.appointment.findMany({
         where: {
           hospitalId: hospitalId,
           appointmentDate: {
-            gte: startDate,
-            lte: endDate,
+            gte: sevenDaysAgo,
+            lte: yesterday,
           },
         },
         include: {
@@ -531,8 +521,8 @@ class AppointmentService {
         summary: {
           total: appointmentHistory.length,
           dateRange: {
-            from: startDate.toISOString(),
-            to: endDate.toISOString()
+            from: sevenDaysAgo.toISOString(),
+            to: yesterday.toISOString()
           },
           statusBreakdown: statusSummary
         },
@@ -540,7 +530,7 @@ class AppointmentService {
       };
 
       // Cache for 1 hrs for history data
-      await redisService.setCache(cacheKey, result, 3600);
+      //await redisService.setCache(cacheKey, result, 3600);
 
       return result;
     } catch (error) {
