@@ -119,6 +119,7 @@ class AdvancedQueueService {
                 name: true,
                 logo: true,
                 contactInfo: true,
+                address: true,
                 themeColor: true
             }
             }
@@ -149,6 +150,7 @@ class AdvancedQueueService {
           patientName: appointment.patientName,
           appointmentDate: appointment.appointmentDate,
           startTime: appointment.startTime,
+          endTime: appointment.endTime,
           status: appointment.status.toLowerCase(),
           paymentStatus: appointment.paymentStatus.toLowerCase()
         },
@@ -156,18 +158,23 @@ class AdvancedQueueService {
           id: appointment.doctor.id,
           name: appointment.doctor.name,
           specialization: appointment.doctor.specialization,
+          qualification: appointment.doctor.qualification,
+          experience: appointment.doctor.experience,
           photo: appointment.doctor.photo
         },
         hospital: {
           id: appointment.hospital.id,
           name: appointment.hospital.name,
           logo: appointment.hospital.logo,
-          themeColor: appointment.hospital.themeColor || "#2563EB"
+          themeColor: appointment.hospital.themeColor,
+          contactInfo: appointment.hospital.contactInfo,
+          address: typeof appointment.hospital.address === 'string' && appointment.hospital.address.trim().startsWith('{') ? 
+            JSON.parse(appointment.hospital.address) : appointment.hospital.address
         },
         queue: {
           position: queueInfo.position,
           appointmentsAhead: queueInfo.appointmentsAhead,
-          isPatientTurn: queueInfo.position === 1,
+          isPatientTurn: queueInfo.position === 1 && queueInfo.estimatedWaitTime === 0,
           estimatedWaitTime: queueInfo.estimatedWaitTime,
           estimatedWaitTimeIST: queueInfo.estimatedWaitTimeIST,
           queueStatus: queueInfo.queueStatus
@@ -401,10 +408,9 @@ class AdvancedQueueService {
     }
 
     // Generate queue status message
-    let queueStatus = 'Your turn is now!';
-    if (appointmentsAhead > 0) {
-      queueStatus = `${appointmentsAhead} patient${appointmentsAhead > 1 ? 's' : ''} ahead of you`;
-    }
+    // let queueStatus = `You are at first position in the your slot of ${appointment.startTime.toISOString()} t0 ${appointment.endTime.toISOString()} `;
+   
+    const queueStatus = `${appointmentsAhead} patient${appointmentsAhead > 1 ? 's' : ''} ahead of you in your slot `;
 
     const result = {
       position,
