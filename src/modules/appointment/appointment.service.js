@@ -115,11 +115,8 @@ class AppointmentService {
     // Update cache
     await this.cacheAppointment(appointment);
 
-    await queueService.publishQueueUpdate(hospitalId, doctorId, appointment.appointmentDate);
+    await queueService.publishQueueUpdate(appointment.hospitalId,appointment.doctorId, appointment.appointmentDate);
 
-    
-    // Invalidate tracking caches to ensure fresh queue data
-    await this.invalidateTrackingCaches(appointment.hospitalId, appointment.doctorId);
     
     // Publish to the appointment updated queue
     await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
@@ -154,7 +151,7 @@ class AppointmentService {
     // Update cache
     await this.cacheAppointment(appointment);
 
-    await queueService.publishQueueUpdate(hospitalId, doctorId, appointment.appointmentDate);
+    await queueService.publishQueueUpdate(appointment.hospitalId, appointment.doctorId, appointment.appointmentDate);
     
     // Publish to the appointment updated queue
     await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
