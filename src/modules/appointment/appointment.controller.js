@@ -460,7 +460,7 @@ class AppointmentController {
    */
   async getAppointmentHistoryByMobileNumber(req, res) {
     try {
-      const { mobileNumber } = req.body;
+      const { mobileNumber } = req.query;
       const hospitalId = req.user.hospital_id;
 
       if (!mobileNumber) {
