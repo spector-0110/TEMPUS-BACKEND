@@ -15,8 +15,6 @@ class AppointmentService {
   async createAppointment(appointmentData) {
     try {
       // Create the appointment in database
-
-      console.log('Creating appointment with data:', JSON.stringify(appointmentData, null, 2));
       const appointment = await prisma.appointment.create({
         data: {
           patientName: appointmentData.patientName,
@@ -42,11 +40,9 @@ class AppointmentService {
           hospital: true,
           doctor: true
         }
-      });
-
-      // Cache the appointment
-      await this.cacheAppointment(appointment,appointmentData.hospitalId);
-
+      });      // Cache the appointment and invalidate related caches
+      await this.cacheAppointment(appointment, appointmentData.hospitalId);
+      
       // Generate tracking link
       const trackingLink = trackingUtil.generateTrackingLink(appointment.id, appointment.hospitalId, appointment.doctorId);
       
@@ -305,7 +301,7 @@ class AppointmentService {
   }
   
   /**
-   * Cache an appointment
+   * Cache an appointment and invalidate related caches
    */
   async cacheAppointment(appointment,hospitalId) {
     const cacheKey = `${CACHE.APPOINTMENT_PREFIX}${appointment.id}`;
@@ -315,8 +311,55 @@ class AppointmentService {
     await redisService.setCache(cacheKey, appointment, CACHE.APPOINTMENT_TTL);
     
     // Invalidate all related caches when appointment data changes
+    await this.invalidateRelatedCaches(appointment);
     
     return appointment;
+  }
+  
+  /**
+   * Invalidate all related caches for an appointment
+   */
+  async invalidateRelatedCaches(appointment) {
+    try {
+      // Get the date string for date-specific caches
+      const dateString = appointment.appointmentDate.toISOString().split('T')[0];
+      
+      // Define patterns for all caches that need invalidation
+      const patterns = [
+        // Hospital appointments list cache
+        `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}${appointment.hospitalId}*`,
+        
+        // Doctor appointments list cache
+        `${CACHE.DOCTOR_APPOINTMENTS_PREFIX}${appointment.doctorId}*`,
+        
+        // Today and tomorrow appointments cache
+        `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}today_tomorrow:${appointment.hospitalId}`,
+        
+        // History appointments cache for this hospital
+        `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}history:${appointment.hospitalId}:*`,
+        
+        // Mobile number specific appointment history for this patient
+        `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}history:${appointment.hospitalId}:${appointment.mobile}`,
+        
+        // Hospital details with doctor availability cache
+        `hospital:public:*`
+      ];
+      
+      // Delete all matching patterns
+      await Promise.all(patterns.map(pattern => redisService.deleteByPattern(pattern)));
+      
+      // Also invalidate queue cache in the advanced-queue service
+      await queueService.invalidateQueueCache(
+        appointment.hospitalId, 
+        appointment.doctorId, 
+        appointment.appointmentDate
+      );
+      
+      console.log(`Cache invalidated for appointment ID: ${appointment.id}`);
+    } catch (error) {
+      console.error('Error invalidating related caches:', error);
+      // Don't throw the error so the main operation can continue
+    }
   }
   
   /**
@@ -604,7 +647,7 @@ class AppointmentService {
       };
 
       // Cache for 30 minutes
-      await redisService.setCache(cacheKey, result, 1800);
+      await redisService.setCache(cacheKey, result, 120);
 
       return result;
     } catch (error) {
