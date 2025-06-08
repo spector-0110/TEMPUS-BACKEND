@@ -472,7 +472,7 @@ class AppointmentService {
 
       // Get current IST date using utility
       const nowIST = TimezoneUtil.getCurrentIst();
-
+      
       const yesterday = new Date(nowIST);
       yesterday.setDate(yesterday.getDate() - 1);
     
@@ -511,8 +511,6 @@ class AppointmentService {
         return acc;
       }, {});
 
-      
-
       const result = {
         appointments: appointmentHistory,
         summary: {
@@ -536,6 +534,84 @@ class AppointmentService {
     }
   }
   
+
+  /**
+   * Get appointment history by mobile number
+   * @param {string} hospitalId - Hospital ID
+   * @param {string} mobileNumber - Patient's mobile number
+   * @param {number} days - Number of days to look back (default: 30)
+   * @returns {object} Object containing appointments and summary for the patient
+   */
+  async getAppointmentHistoryByMobileNumber(hospitalId, mobileNumber) {
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
+      }
+      
+      if (!mobileNumber) {
+        throw new Error('Mobile number is required');
+      }
+
+      // Cache key for mobile number appointment history
+      const cacheKey = `${CACHE.HOSPITAL_APPOINTMENTS_PREFIX}history:${hospitalId}:${mobileNumber}`;
+      
+      // Try to get from cache first
+      const cachedHistory = await redisService.getCache(cacheKey);
+      if (cachedHistory) {
+        return cachedHistory;
+      }
+
+      // Query for appointments with the provided mobile number
+      const appointmentHistory = await prisma.appointment.findMany({
+        where: {
+          hospitalId: hospitalId,
+          mobile: mobileNumber,
+        },
+        include: {
+          doctor: {
+            select: {
+              id: true,
+              name: true,
+              specialization: true,
+              photo: true,
+            },
+          },
+        },
+        orderBy: [
+          { appointmentDate: 'desc' },
+          { startTime: 'desc' },
+        ],
+      });
+
+      // Group appointments by status for summary
+      const statusSummary = appointmentHistory.reduce((acc, appointment) => {
+        acc[appointment.status] = (acc[appointment.status] || 0) + 1;
+        return acc;
+      }, {});
+
+      const result = {
+        appointments: appointmentHistory,
+        summary: {
+          total: appointmentHistory.length,
+          patientInfo: {
+            mobileNumber,
+            // If there are appointments, get the patient name from the most recent one
+            patientName: appointmentHistory.length > 0 ? appointmentHistory[0].patientName : null
+          },
+          statusBreakdown: statusSummary
+        },
+        fetchedAt: TimezoneUtil.getIstISOString(TimezoneUtil.getCurrentIst())
+      };
+
+      // Cache for 30 minutes
+      await redisService.setCache(cacheKey, result, 1800);
+
+      return result;
+    } catch (error) {
+      console.error('Error fetching appointment history by mobile:', error);
+      throw error;
+    }
+  }
 
   // /**
   //  * Get hospital details by subdomain with doctor availability for appointments

@@ -455,6 +455,38 @@ class AppointmentController {
     }
    }
 
+   /**
+   * Get appointments history by mobile number
+   */
+  async getAppointmentHistoryByMobileNumber(req, res) {
+    try {
+      const { mobileNumber } = req.body;
+      const hospitalId = req.user.hospital_id;
+
+      if (!mobileNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Mobile number is required'
+        });
+      }
+      
+      const appointments = await appointmentService.getAppointmentHistoryByMobileNumber(hospitalId, mobileNumber);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Appointment history retrieved successfully',
+        data: appointments
+      });
+    } catch (error) {
+      console.error('Error in getAppointmentHistoryByMobileNumber controller:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to retrieve appointment history', 
+        error: error.message 
+      });
+    }
+  }
+
 }
 
 

@@ -10,10 +10,13 @@ router.get('/details/:subdomain',verifySignature, appointmentController.getHospi
 // Patient endpoints - no auth required for patient to create/manage their own appointments
 router.post('/',verifySignature, appointmentController.createAppointment);
 router.delete('/:id', verifySignature,appointmentController.deleteAppointment);
+router.get('/:id', verifySignature, appointmentController.getAppointmentById);
 
 // Protected endpoints - require authentication
 router.get('/', authMiddleware, appointmentController.getTodayAndTomorrowandPastWeekAppointments);
 router.get('/history', authMiddleware, appointmentController.getAppointmentHistory);
+router.get('/mobile', authMiddleware, appointmentController.getAppointmentHistoryByMobileNumber);
+
 
 router.get('/:id', authMiddleware, appointmentController.getAppointmentById);
 router.patch('/:id/status', authMiddleware, appointmentController.updateAppointmentStatus);
