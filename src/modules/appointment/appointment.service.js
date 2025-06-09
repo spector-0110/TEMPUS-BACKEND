@@ -126,14 +126,14 @@ class AppointmentService {
   /**
    * Update an appointment's payment status and method
    */
-  async updatePaymentStatus(appointmentId, paymentStatus, paymentMethod) {
+  async updatePaymentStatus(appointmentId, paymentStatus, paymentMethod, amount) {
     
     const updateData = {};
     if (paymentStatus) updateData.paymentStatus = paymentStatus;
     if (paymentMethod) updateData.paymentMethod = paymentMethod;
+    if (amount !== undefined && amount !== null) updateData.amount = parseInt(amount, 10);
     
     updateData.paymentAt = TimezoneUtil.getCurrentIst(); // Set payment time to current IST time
-
     // Update the appointment
     const appointment = await prisma.appointment.update({
       where: { id: appointmentId },

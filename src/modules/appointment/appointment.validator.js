@@ -76,6 +76,7 @@ const appointmentStatusSchema = Joi.object({
 });
 
 // Schema for updating payment status
+
 const paymentStatusSchema = Joi.object({
   paymentStatus: Joi.string()
     .valid(...Object.values(APPOINTMENT_PAYMENT_STATUS))
@@ -90,7 +91,15 @@ const paymentStatusSchema = Joi.object({
     .messages({
       'any.only': `Payment method must be one of: ${Object.values(APPOINTMENT_PAYMENT_METHOD).join(', ')}`,
       'any.required': 'Payment method is required'
-    })
+    }),
+  amount: Joi.number()
+  .positive()
+    .required()
+    .messages({
+        'number.base': 'Amount must be a number',
+        'number.positive': 'Amount must be a positive number',
+        'any.required': 'Amount is required'
+      })
 });
 
 // Schema for appointment ID validation

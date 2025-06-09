@@ -40,31 +40,6 @@ class AppointmentController {
   }
 
   /**
-   * Get all appointments with optional filtering
-   */
-  async getAllAppointments(req, res) {
-    try {
-      // Extract query params for filtering
-      
-      // Get appointments with filters
-      const appointments = await appointmentService.getAllAppointment(req,res);
-      
-      return res.status(200).json({
-        success: true,
-        message: 'Appointments retrieved successfully',
-        data: appointments
-      });
-    } catch (error) {
-      console.error('Error in getAllAppointments controller:', error);
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Failed to retrieve appointments', 
-        error: error.message 
-      });
-    }
-  }
-
-  /**
    * Get a specific appointment by ID
    */
   async getAppointmentById(req, res) {
@@ -241,7 +216,8 @@ class AppointmentController {
       const updatedAppointment = await appointmentService.updatePaymentStatus(
         req.params.id, 
         value.paymentStatus,
-        value.paymentMethod
+        value.paymentMethod,
+        value.amount
       );
       
       return res.status(200).json({

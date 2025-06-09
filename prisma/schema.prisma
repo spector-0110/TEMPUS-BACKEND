@@ -194,6 +194,7 @@ model Appointment {
   paymentMethod      AppointmentPaymentMethod?    @map("appointment_payemnt_method")
   createdAt          DateTime           @default(now()) @map("created_at")
   paymentAt          DateTime?            @map("payment_at")
+  amount             Int?
 
   // Relations
   hospital   Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
