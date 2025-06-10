@@ -13,10 +13,10 @@ class MailService {
   }
 
   initializeTransporter() {
-    this.transporter = nodemailer.createTransport({
+    const transportConfig = {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
+      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASSWORD
@@ -26,10 +26,22 @@ class MailService {
       maxMessages: 100,
       rateDelta: 1000, // Min time between messages
       rateLimit: 5, // Max messages per rateDelta
-      tls: {
+    };
+
+    // For Hostinger and other providers using SSL/TLS
+    if (process.env.SMTP_SECURE === 'true') {
+      transportConfig.tls = {
+        rejectUnauthorized: false, // Allow self-signed certificates
+        ciphers: 'SSLv3'
+      };
+    } else {
+      // For STARTTLS
+      transportConfig.tls = {
         rejectUnauthorized: process.env.NODE_ENV === 'production'
-      }
-    });
+      };
+    }
+
+    this.transporter = nodemailer.createTransport(transportConfig);
 
     // Handle transporter events
     this.transporter.on('error', (err) => {
