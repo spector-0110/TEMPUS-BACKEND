@@ -79,67 +79,81 @@ class SubscriptionService {
     }
   }
 
-  async sendSubscriptionEmail(subscription, emailType, hospital) {
-    const formatCurrency = (amount) => `₹${Number(amount).toFixed(2)}`;
-    const formatDate = (date) => new Date(date).toLocaleDateString();
+async sendSubscriptionEmail(subscription, emailType, hospital) {
+  const formatCurrency = (amount) => `₹${Number(amount).toFixed(2)}`;
+  const formatDate = (date) => new Date(date).toLocaleDateString();
 
-    const getEmailContent = () => {
-      const baseContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563EB;">Subscription ${emailType}</h2>
-          <p>Dear ${hospital.name} Administrator,</p>
-          
-          <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-            <p><strong>Subscription Details:</strong></p>
-            <ul>
-              <li>Doctors Allowed: ${subscription.doctorCount}</li>
-              <li>Billing Cycle: ${subscription.billingCycle}</li>
-              <li>Total Price: ${formatCurrency(subscription.totalPrice)}</li>
-              <li>Valid Until: ${formatDate(subscription.endDate)}</li>
-              <li>Payment Method: ${subscription.paymentMethod}</li>
+  const getEmailContent = () => {
+    const baseContent = `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        
+        <!-- Header -->
+        <div style="background-color: #2563EB; padding: 20px;">
+          <h2 style="color: #ffffff; margin: 0;">Subscription ${emailType}</h2>
+        </div>
+
+        <!-- Body -->
+        <div style="padding: 24px;">
+          <p style="font-size: 16px; color: #111827;">Dear ${hospital.name} Administrator,</p>
+
+          <div style="background-color: #F3F4F6; padding: 16px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0;"><strong>Subscription Details:</strong></p>
+            <ul style="padding-left: 20px; margin: 0; color: #374151;">
+              <li>Doctors Allowed: <strong>${subscription.doctorCount}</strong></li>
+              <li>Billing Cycle: <strong>${subscription.billingCycle}</strong></li>
+              <li>Total Price: <strong>${formatCurrency(subscription.totalPrice)}</strong></li>
+              <li>Valid Until: <strong>${formatDate(subscription.endDate)}</strong></li>
+              <li>Payment Method: <strong>${subscription.paymentMethod}</strong></li>
             </ul>
-          </div>`;
+          </div>
+    `;
 
-      switch (emailType) {
-        case 'Created':
-          return baseContent + `
-            <p>Your subscription has been successfully created. Welcome aboard!</p>
-            <p>Your subscription is now active and you can start adding doctors to your hospital.</p>`;
-        
-        case 'Updated':
-          return baseContent + `
-            <p>Your subscription has been successfully updated with the new doctor count.</p>
-            <p>The changes are effective immediately.</p>`;
-        
-        case 'Renewed':
-          return baseContent + `
-            <p>Your subscription has been successfully renewed.</p>
-            <p>Thank you for continuing to trust us with your hospital management needs.</p>`;
-        
-        default:
-          return baseContent;
-      }
+    const dynamicMessage = {
+      Created: `
+        <p>Your subscription has been <strong>successfully created</strong>. Welcome aboard!</p>
+        <p>You can now start adding doctors and managing your hospital with Tiqora.</p>
+      `,
+      Updated: `
+        <p>Your subscription has been <strong>updated</strong> with the new doctor count.</p>
+        <p>These changes are now active and reflected in your dashboard.</p>
+      `,
+      Renewed: `
+        <p>Your subscription has been <strong>renewed</strong> successfully.</p>
+        <p>We appreciate your continued trust in Tiqora for hospital queue management.</p>
+      `
     };
 
-    const emailContent = getEmailContent() + `
-          <div style="margin-top: 20px;">
-            <p>If you have any questions, please don't hesitate to contact our support team.</p>
-          </div>
-        </div>`;
+    return baseContent + (dynamicMessage[emailType] || '');
+  };
 
-    // Send email through message service
-    return messageService.sendMessage('email', {
-      to: hospital.adminEmail,
-      subject: `Subscription ${emailType} - ${hospital.name}`,
-      content: emailContent,
-      hospitalId: hospital.id,
-      metadata: {
-        subscriptionId: subscription.id,
-        emailType: `subscription_${emailType.toLowerCase()}`,
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
+  const emailContent = getEmailContent() + `
+        <div style="margin-top: 20px;">
+          <p style="font-size: 15px; color: #4B5563;">
+            If you have any questions, feel free to reach out to our support team at <a href="mailto:support@tiqora.in" style="color: #2563EB;">support@tiqora.in</a>.
+          </p>
+        </div>
+
+        <!-- Footer -->
+        <div style="border-top: 1px solid #E5E7EB; margin-top: 32px; padding-top: 16px; text-align: center; font-size: 12px; color: #9CA3AF;">
+          <p style="margin: 0;">This is an automated email from Tiqora</p>
+          <p style="margin: 0;">©️ ${new Date().getFullYear()} Tiqora Technologies. All rights reserved.</p>
+        </div>
+      </div>
+    </div>`;
+
+  // Send email through message service
+  return messageService.sendMessage('email', {
+    to: hospital.adminEmail,
+    subject: `Subscription ${emailType} - ${hospital.name}`,
+    content: emailContent,
+    hospitalId: hospital.id,
+    metadata: {
+      subscriptionId: subscription.id,
+      emailType: `subscription_${emailType.toLowerCase()}`,
+      timestamp: new Date().toISOString()
+    }
+  });
+}
 
   async createSubscription(tx=null, hospitalId, doctorCount, billingCycle, paymentMethod=null, paymentDetails="Trail") {
     if (doctorCount < LIMITS.MIN_DOCTORS || doctorCount > LIMITS.MAX_DOCTORS) {

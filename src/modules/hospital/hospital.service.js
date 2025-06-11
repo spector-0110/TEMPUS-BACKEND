@@ -18,292 +18,459 @@ const {
 class HospitalService {
   
   async createHospital(supabaseUserId, hospitalData, userEmail) {
-    // Validate using form configuration
-    const validationResult = await hospitalValidator.validateFormData(hospitalData);
-    
-    if (!validationResult.isValid) {
-      throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
-    }
-
-    const validatedData = validationResult.transformedData;
-
-
-    if (await this.hospitalExistsBySupabaseId(supabaseUserId)) {
-      throw new Error('Hospital already exists for this user');
-    }
-
-    // Use transaction to ensure data consistency
-    const newHospital = await prisma.$transaction(async (tx) => {
-      // Check unique constraints
-      const [existingSubdomain] = await Promise.all([
-        tx.hospital.findUnique({
-          where: { subdomain: validatedData.subdomain },
-          select: { id: true }
-        })
-      ]);
-
-      if (existingSubdomain) {
-        throw new Error('Subdomain already in use');
+    try {
+      // Validate using form configuration
+      const validationResult = await hospitalValidator.validateFormData(hospitalData);
+      
+      if (!validationResult.isValid) {
+        throw Object.assign(new Error('Validation failed'), { validationErrors: validationResult.errors });
       }
 
-      // Create hospital record with validated data
-      const hospital = await tx.hospital.create({
-        data: {
-          supabaseUserId,
-          name: validatedData.name,
-          subdomain: validatedData.subdomain.toLowerCase(),
-          adminEmail: userEmail,
-          gstin: validatedData.gstin,
-          address: {
-            street: validatedData.street,
-            city: validatedData.city,
-            district: validatedData.district,
-            state: validatedData.state,
-            pincode: validatedData.pincode,
-            country: validatedData.country || 'India'
-          },
-          contactInfo: {
-            phone: validatedData.phone,
-            website: validatedData.website || null
-          },
-          logo: validatedData.logo,
-          themeColor: validatedData.themeColor || DEFAULT_THEME_COLOR,
-          establishedDate: validatedData.establishedDate
-        }
-      });
+      const validatedData = validationResult.transformedData;
 
-      // Initialize with basic subscription
-      const subscription = await subscriptionService.createSubscription(tx,hospital.id, 1, 'MONTHLY');
+      // Check if hospital already exists
+      const hospitalExists = await this.hospitalExistsBySupabaseId(supabaseUserId);
+      if (hospitalExists) {
+        throw new Error('Hospital already exists for this user');
+      }
 
-      // Define email type for welcome message
-      const emailType = 'Hospital';
-      
-      // Queue welcome email
-      await messageService.sendMessage('email',{
-        to: userEmail,
-        subject: 'Welcome to Tempus',
-        hospitalId: hospital.id,
-        metadata: {
-        subscriptionId: subscription.id,
-        emailType: `Welcome${emailType.toLowerCase()}`,
-        timestamp: new Date().toISOString()
-        },
-        content: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #2563EB;">Welcome to Tempus!</h2>
-              <p>Dear Admin,</p>
-              <p>Your hospital "${hospital.name}" has been successfully registered with Tempus. Here are your details:</p>
+      // Use transaction to ensure data consistency with increased timeout (15s)
+      const newHospital = await prisma.$transaction(
+        async (tx) => {
+        try {
+          // Check unique constraints
+          const [existingSubdomain] = await Promise.all([
+            tx.hospital.findUnique({
+              where: { subdomain: validatedData.subdomain },
+              select: { id: true }
+            })
+          ]);
+
+          if (existingSubdomain) {
+            throw new Error('Subdomain already in use');
+          }
+
+          // Create hospital record with validated data
+          const hospital = await tx.hospital.create({
+            data: {
+              supabaseUserId,
+              name: validatedData.name,
+              subdomain: validatedData.subdomain.toLowerCase(),
+              adminEmail: userEmail,
+              gstin: validatedData.gstin,
+              address: {
+                street: validatedData.street,
+                city: validatedData.city,
+                district: validatedData.district,
+                state: validatedData.state,
+                pincode: validatedData.pincode,
+                country: validatedData.country || 'India'
+              },
+              contactInfo: {
+                phone: validatedData.phone,
+                website: validatedData.website || null
+              },
+              logo: validatedData.logo,
+              themeColor: validatedData.themeColor || DEFAULT_THEME_COLOR,
+              establishedDate: validatedData.establishedDate
+            }
+          });
+
+          // Initialize with basic subscription
+          const subscription = await subscriptionService.createSubscription(tx, hospital.id, 1, 'MONTHLY');
+
+          // Define email type for welcome message
+          const emailType = 'Hospital';
+          
+          // Queue welcome email
+          await messageService.sendMessage('email',{
+            to: userEmail,
+            subject: 'Welcome to Tempus',
+            hospitalId: hospital.id,
+            metadata: {
+              subscriptionId: subscription.id,
+              emailType: `Welcome${emailType.toLowerCase()}`,
+              timestamp: new Date().toISOString()
+            },
+            content: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px;">
+              <h2 style="color: #2563EB; font-size: 24px; margin-bottom: 10px;">Welcome to Tiqora!</h2>
               
-              <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-                <p><strong>Hospital Name:</strong> ${hospital.name}</p>
-                <p><strong>Subdomain:</strong> ${hospital.subdomain}</p>
-                <p><strong>Admin Email:</strong> ${hospital.adminEmail}</p>
+              <p style="font-size: 16px; color: #111827;">Dear Admin,</p>
+              
+              <p style="font-size: 16px; color: #111827; line-height: 1.6;">
+                Your hospital "<strong>${hospital.name}</strong>" has been successfully registered with <strong>Tiqora</strong>. Here are your details:
+              </p>
+              
+              <div style="background-color: #f9fafb; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #e5e7eb;">
+                <p style="margin: 0; font-size: 16px;"><strong>Hospital Name:</strong> ${hospital.name}</p>
+                <p style="margin: 5px 0 0 0; font-size: 16px;"><strong>Subdomain:</strong> ${hospital.subdomain}</p>
+                <p style="margin: 5px 0 0 0; font-size: 16px;"><strong>Admin Email:</strong> ${hospital.adminEmail}</p>
+                
                 ${
                   hospital.address ? `
-                    <p><strong>Address:</strong></p>
-                    <p>
-                      ${hospital.address.street},<br>
-                      ${hospital.address.district}, ${hospital.address.state} - ${hospital.address.pincode}<br>
-                      ${hospital.address.country}
-                    </p>
+                    <div style="margin-top: 10px;">
+                      <p style="margin: 0; font-size: 16px;"><strong>Address:</strong></p>
+                      <p style="margin: 5px 0 0 0; font-size: 16px;">
+                        ${hospital.address.street},<br>
+                        ${hospital.address.district}, ${hospital.address.state} - ${hospital.address.pincode}<br>
+                        ${hospital.address.country}
+                      </p>
+                    </div>
                   ` : ''
                 }
               </div>
 
-              <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-                <p><strong>Your Initial Subscription Details:</strong></p>
-                <ul>
+              <div style="background-color: #f9fafb; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #e5e7eb;">
+                <p style="margin: 0 0 10px 0; font-size: 16px;"><strong>Your Initial Subscription Details:</strong></p>
+                <ul style="margin: 0 0 10px 20px; font-size: 16px; padding-left: 20px;">
                   <li>Doctors Allowed: ${subscription.doctorCount}</li>
                   <li>Valid until: ${subscription.endDate.toLocaleDateString()}</li>
                 </ul>
-                <p><em>You can upgrade your subscription anytime from the dashboard</em></p>
+                <p style="font-style: italic; color: #6b7280; font-size: 15px;">You can upgrade your subscription anytime from the dashboard.</p>
               </div>
 
-              <p>To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
+              <p style="font-size: 16px; color: #111827;">To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
             </div>
-          `
-      });
+            `
+          });
 
-      return {...hospital, subscription};
-    });
+          return {...hospital, subscription};
+        } catch (txError) {
+          // Log transaction-specific errors
+          console.error('Transaction error in createHospital:', txError);
+          throw txError; // Re-throw to be caught by the outer try-catch
+        }
+      }, {
+        maxWait: 15000, // Max time to acquire connection (ms)
+        timeout: 15000  // Max time for transaction to complete (ms)
+      });
+      
+      return newHospital;
+    } catch (error) {
+      console.error('Error creating hospital:', error);
+      
+      // Re-throw validation errors with their specific structure
+      if (error.validationErrors) {
+        throw error;
+      }
+      
+      // Handle specific error cases
+      if (error.message.includes('Subdomain already in use')) {
+        throw new Error('The subdomain is already taken. Please choose a different one.');
+      }
+      
+      // Generic error
+      throw new Error(`Failed to create hospital: ${error.message}`);
+    }
   }
 
   async getHospitalDetails(hospitalId) {
-    const hospital = await prisma.hospital.findUnique({
-      where: { id: hospitalId }
-    });
-    
-    if (!hospital) {
-      throw new Error('Hospital not found');
-    }
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
+      }
+      
+      const hospital = await prisma.hospital.findUnique({
+        where: { id: hospitalId }
+      });
+      
+      if (!hospital) {
+        throw new Error('Hospital not found');
+      }
 
-    return hospital;
+      return hospital;
+    } catch (error) {
+      console.error('Error fetching hospital details:', error);
+      throw new Error(`Failed to get hospital details: ${error.message}`);
+    }
   }
 
   async requestEditVerification(hospitalId) {
-    const hospital = await prisma.hospital.findUnique({
-      where: { id: hospitalId },
-      select: { adminEmail: true }
-    });
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
+      }
+      
+      const hospital = await prisma.hospital.findUnique({
+        where: { id: hospitalId },
+        select: { adminEmail: true, id: true }
+      });
 
-    if (!hospital) {
-      throw new Error('Hospital not found');
-    }
+      if (!hospital) {
+        throw new Error('Hospital not found');
+      }
 
-    // Generate OTP
-    const otp = await otpService.generateOTP(hospitalId);
+      // Generate OTP
+      const otp = await otpService.generateOTP(hospitalId);
 
-    // Send OTP via email using message service
-    await messageService.sendMessage('otp',{
-      to: hospital.adminEmail,
-      subject: 'OTP Verification for Hospital Edit',
-      hospitalId: hospital.id,
-      metadata: {
-        hospitalId,
-        type: 'edit_verification_otp',
-        timestamp: new Date().toISOString(),
-        otp
-      },
-      content: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563EB;">OTP Verification Required</h2>
-          <p>Dear Hospital Administrator,</p>
-          <p>Your OTP for editing hospital details is:</p>
-          <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0; text-align: center;">
-            <h1 style="color: #2563EB; font-size: 32px;">${otp}</h1>
+      // Send OTP via email using message service
+      await messageService.sendMessage('otp',{
+        to: hospital.adminEmail,
+        subject: 'OTP Verification for Hospital Edit',
+        hospitalId: hospital.id,
+        metadata: {
+          hospitalId,
+          type: 'edit_verification_otp',
+          timestamp: new Date().toISOString(),
+          otp
+        },
+        content: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px;">
+          <!-- Tiqora Header -->
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h2 style="color: #2563EB; font-size: 24px; margin: 0;">Tiqora</h2>
+            <p style="color: #6b7280; font-size: 14px; margin-top: 4px;">Smart Hospital CRM & Queue Management</p>
           </div>
-          <p>This OTP will expire in 5 minutes.</p>
-          <p>If you did not request this OTP, please ignore this email.</p>
+
+          <!-- Email Content -->
+          <h3 style="color: #2563EB; font-size: 20px; margin-bottom: 10px;">OTP Verification Required</h3>
+
+          <p style="font-size: 16px; color: #111827;">Dear Hospital Administrator,</p>
+
+          <p style="font-size: 16px; color: #111827;">Your OTP for editing hospital details is:</p>
+
+          <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0; text-align: center; border-radius: 6px;">
+            <h1 style="color: #2563EB; font-size: 36px; letter-spacing: 2px;">${otp}</h1>
+          </div>
+
+          <p style="font-size: 16px; color: #111827;">This OTP will expire in <strong>5 minutes</strong>.</p>
+
+          <p style="font-size: 15px; color: #6b7280;">If you did not request this OTP, please ignore this email.</p>
+
+          <!-- Footer -->
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #e5e7eb;">
+          <p style="font-size: 13px; color: #9ca3af; text-align: center;">
+            Powered by <strong>Tiqora</strong> • Secure Healthcare CRM
+          </p>
         </div>
-      `
-    });
+        `
+      });
+      
+      return { success: true, message: 'OTP sent successfully' };
+    } catch (error) {
+      console.error('Error requesting edit verification:', error);
+      
+      if (error.message.includes('Hospital not found')) {
+        throw new Error('Hospital not found');
+      }
+      
+      if (error.message.includes('OTP generation failed')) {
+        throw new Error('Failed to generate OTP. Please try again.');
+      }
+      
+      throw new Error(`Failed to send verification OTP: ${error.message}`);
+    }
   }
 
   async verifyEditOTP(hospitalId, otp) {
-    if (!otp) {
-      throw new Error('OTP is required');
-    }
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
+      }
+      
+      if (!otp) {
+        throw new Error('OTP is required');
+      }
 
-    await otpService.verifyOTP(hospitalId, otp);
+      await otpService.verifyOTP(hospitalId, otp);
+      return { success: true, message: 'OTP verified successfully' };
+    } catch (error) {
+      console.error('Error verifying OTP:', error);
+      
+      if (error.message.includes('OTP is required')) {
+        throw new Error('OTP is required');
+      }
+      
+      if (error.message.includes('Invalid OTP') || error.message.includes('expired')) {
+        throw new Error('Invalid or expired OTP. Please request a new one.');
+      }
+      
+      throw new Error(`Failed to verify OTP: ${error.message}`);
+    }
   }
 
   async updateHospitalDetails(hospitalId, updateData) {
-
-
-  const pickFields=(source, fields) => {
-    return fields.reduce((result, field) => {
-      if (source[field] !== undefined) {
-        result[field] = source[field];
+    try {
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
       }
-      return result;
-    }, {});
-  }
-  // 1. Check OTP verification
-  const isVerified = await otpService.checkEditVerificationStatus(hospitalId);
-  if (!isVerified) throw new Error('OTP verification required for editing');
+      
+      if (!updateData || Object.keys(updateData).length === 0) {
+        throw new Error('Update data is required');
+      }
+      
+      const pickFields = (source, fields) => {
+        return fields.reduce((result, field) => {
+          if (source[field] !== undefined) {
+            result[field] = source[field];
+          }
+          return result;
+        }, {});
+      }
+      
+      // 1. Check OTP verification
+      const isVerified = await otpService.checkEditVerificationStatus(hospitalId);
+      if (!isVerified) throw new Error('OTP verification required for editing');
 
-  // 2. Validate input data
-  const { isValid, errors, transformedData } = await hospitalValidator.validateFormData(updateData, true);
-  if (!isValid) {
-    throw Object.assign(new Error('Validation failed'), { validationErrors: errors });
-  }
+      // 2. Validate input data
+      const { isValid, errors, transformedData } = await hospitalValidator.validateFormData(updateData, true);
+      if (!isValid) {
+        throw Object.assign(new Error('Validation failed'), { validationErrors: errors });
+      }
 
-  // 3. Fetch existing hospital data once
-  const currentHospital = await prisma.hospital.findUnique({
-    where: { id: hospitalId },
-    select: { address: true, contactInfo: true, name: true, subdomain: true, adminEmail: true }
-  });
+      // 3. Fetch existing hospital data once
+      const currentHospital = await prisma.hospital.findUnique({
+        where: { id: hospitalId },
+        select: { address: true, contactInfo: true, name: true, subdomain: true, adminEmail: true }
+      });
+      
+      if (!currentHospital) {
+        throw new Error('Hospital not found');
+      }
 
-  const updatedData = { ...transformedData };
+      const updatedData = { ...transformedData };
 
-  // 4. Merge address updates if needed
-  if (ALLOWED_ADDRESS_UPDATE_FIELDS.some(field => field in updateData)) {
-    updatedData.address = {
-      ...currentHospital.address,
-      ...pickFields(transformedData, ALLOWED_ADDRESS_UPDATE_FIELDS)
-    };
-  }
+      // 4. Merge address updates if needed
+      if (ALLOWED_ADDRESS_UPDATE_FIELDS.some(field => field in updateData)) {
+        updatedData.address = {
+          ...currentHospital.address,
+          ...pickFields(transformedData, ALLOWED_ADDRESS_UPDATE_FIELDS)
+        };
+      }
 
-  // 5. Merge contact info updates if needed
-  if (ALLOWED_CONTACT_INFO.some(field => field in updateData)) {
-    updatedData.contactInfo = {
-      ...currentHospital.contactInfo,
-      ...pickFields(transformedData, ALLOWED_CONTACT_INFO)
-    };
-  }
+      // 5. Merge contact info updates if needed
+      if (ALLOWED_CONTACT_INFO.some(field => field in updateData)) {
+        updatedData.contactInfo = {
+          ...currentHospital.contactInfo,
+          ...pickFields(transformedData, ALLOWED_CONTACT_INFO)
+        };
+      }
 
-  // 6. Sanitize final update data
-  const sanitizedData = Object.fromEntries(
-    Object.entries(updatedData).filter(([key]) => ALLOWED_UPDATE_FIELDS.includes(key))
-  );
+      // 6. Sanitize final update data
+      const sanitizedData = Object.fromEntries(
+        Object.entries(updatedData).filter(([key]) => ALLOWED_UPDATE_FIELDS.includes(key))
+      );
 
-  if (Object.keys(sanitizedData).length === 0) {
-    throw new Error('No valid fields to update');
-  }
+      if (Object.keys(sanitizedData).length === 0) {
+        throw new Error('No valid fields to update');
+      }
 
-  // 7. Update hospital
-  const updatedHospital = await prisma.hospital.update({
-    where: { id: hospitalId },
-    data: sanitizedData
-  });
+      // 7. Update hospital
+      const updatedHospital = await prisma.hospital.update({
+        where: { id: hospitalId },
+        data: sanitizedData
+      });
 
-  // 8. Invalidate OTP status
-  await otpService.invalidateEditVerificationStatus(hospitalId);
+      // 8. Invalidate OTP status
+      await otpService.invalidateEditVerificationStatus(hospitalId);
 
-  // 9. Send update email
-  await messageService.sendMessage('email', {
-    to: updatedHospital.adminEmail,
-    subject: 'Hospital Details Updated',
-    hospitalId: updatedHospital.id,
-    metadata: {
-      emailType: 'Details Updatehospital',
-      timestamp: new Date().toISOString()
-    },
-    content: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563EB;">Hospital Details Updated</h2>
-        <p>Dear Admin,</p>
-        <p>Your hospital "${updatedHospital.name}" details have been successfully updated in Tempus. Here are your details:</p>
-        
-        <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-          <p><strong>Hospital Name:</strong> ${updatedHospital.name}</p>
-          <p><strong>Subdomain:</strong> ${updatedHospital.subdomain}</p>
-          <p><strong>Admin Email:</strong> ${updatedHospital.adminEmail}</p>
-          ${updatedHospital.address ? `<p><strong>Address:</strong> ${updatedHospital.address}</p>` : ''}
+      // 9. Send update email
+      await messageService.sendMessage('email', {
+        to: updatedHospital.adminEmail,
+        subject: 'Hospital Details Updated',
+        hospitalId: updatedHospital.id,
+        metadata: {
+          emailType: 'Details Updatehospital',
+          timestamp: new Date().toISOString()
+        },
+        content: `
+         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px;">
+          <!-- Header Branding -->
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h2 style="color: #2563EB; font-size: 24px; margin: 0;">Tiqora</h2>
+            <p style="color: #6b7280; font-size: 14px; margin-top: 4px;">Smart Hospital CRM & Appointment Management</p>
+          </div>
+
+          <!-- Main Content -->
+          <h3 style="color: #2563EB; font-size: 20px; margin-bottom: 10px;">Hospital Details Updated</h3>
+
+          <p style="font-size: 16px; color: #111827;">Dear Admin,</p>
+
+          <p style="font-size: 16px; color: #111827; line-height: 1.6;">
+            Your hospital "<strong>${updatedHospital.name}</strong>" details have been successfully updated in <strong>Tiqora</strong>. Below are the updated details:
+          </p>
+
+          <!-- Info Block -->
+          <div style="background-color: #f9fafb; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #e5e7eb;">
+            <p style="margin: 0 0 10px 0; font-size: 16px;"><strong>Hospital Name:</strong> ${updatedHospital.name}</p>
+            <p style="margin: 0 0 10px 0; font-size: 16px;"><strong>Subdomain:</strong> ${updatedHospital.subdomain}</p>
+            <p style="margin: 0 0 10px 0; font-size: 16px;"><strong>Admin Email:</strong> ${updatedHospital.adminEmail}</p>
+            
+            ${updatedHospital.address ? `
+              <div style="margin-top: 10px;">
+                <p style="margin: 0; font-size: 16px;"><strong>Address:</strong></p>
+                <p style="margin: 5px 0 0 0; font-size: 16px;">${updatedHospital.address}</p>
+              </div>
+            ` : ''}
+          </div>
+
+          <p style="font-size: 16px; color: #111827;">You can view and manage your hospital settings through the dashboard.</p>
+
+          <!-- Footer -->
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #e5e7eb;">
+          <p style="font-size: 13px; color: #9ca3af; text-align: center;">
+            Powered by <strong>Tiqora</strong> • Simplifying Healthcare with Technology
+          </p>
         </div>
+        `
+      });
+      
+      // Invalidate dashboard cache to reflect the updated hospital details immediately
+      const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
+      await redisService.invalidateCache(CACHE_KEY);
 
-        <p>You can view and manage your hospital settings through the dashboard.</p>
-      </div>
-    `
-  });
-  
-  // Invalidate dashboard cache to reflect the updated hospital details immediately
-  const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
-  await redisService.invalidateCache(CACHE_KEY);
-
-  return updatedHospital;
-}
+      return updatedHospital;
+    } catch (error) {
+      console.error('Error updating hospital details:', error);
+      
+      // Re-throw validation errors with their specific structure
+      if (error.validationErrors) {
+        throw error;
+      }
+      
+      // Handle specific cases with clear messages
+      if (error.message.includes('OTP verification required')) {
+        throw new Error('OTP verification required for editing. Please verify your OTP first.');
+      }
+      
+      if (error.message.includes('No valid fields')) {
+        throw new Error('No valid fields to update. Please check the allowed fields.');
+      }
+      
+      if (error.message.includes('Hospital not found')) {
+        throw new Error('Hospital not found');
+      }
+      
+      throw new Error(`Failed to update hospital details: ${error.message}`);
+    }
+  }
 
   async getDashboardStats(hospitalId) {
-    // Try to get stats from cache first
-    const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
-    const CACHE_EXPIRY = 600; // 10 minutes cache
-    
     try {
-      const cachedStats = await redisService.getCache(CACHE_KEY);
-      if (cachedStats) {
-        return cachedStats;
+      if (!hospitalId) {
+        throw new Error('Hospital ID is required');
       }
-    } catch (error) {
-      console.error('Error fetching dashboard stats from cache:', error);
-      // Continue to fetch from database if cache fails
-    }
+      
+      // Try to get stats from cache first
+      const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
+      const CACHE_EXPIRY = 600; // 10 minutes cache
+      
+      try {
+        const cachedStats = await redisService.getCache(CACHE_KEY);
+        if (cachedStats) {
+          return cachedStats;
+        }
+      } catch (cacheError) {
+        console.error('Error fetching dashboard stats from cache:', cacheError);
+        // Continue to fetch from database if cache fails
+      }
 
-    try {
       const today = new Date();
       const thirtyDaysAgo = new Date(today);
       thirtyDaysAgo.setDate(today.getDate() - 30);
 
+      // Use Promise.all with individual try/catch blocks for better error handling
       const [
         appointments,
         doctors,
@@ -328,14 +495,22 @@ class HospitalService {
               }
             }
           }
+        }).catch(err => {
+          console.error('Error fetching appointments:', err);
+          return []; // Return empty array on failure
         }),
+        
         // All doctors with their schedules
         prisma.doctor.findMany({
           where: { hospitalId },
           include: {
             schedules: true
           }
+        }).catch(err => {
+          console.error('Error fetching doctors:', err);
+          return []; // Return empty array on failure
         }),
+        
         // Current subscription
         prisma.hospitalSubscription.findFirst({
           where: { 
@@ -345,65 +520,111 @@ class HospitalService {
               gt: new Date()
             }
           }
+        }).catch(err => {
+          console.error('Error fetching subscription:', err);
+          return null; // Return null on failure
         }),
+        
         // Subscription history
         prisma.subscriptionHistory.findMany({
           where: { hospitalId },
           orderBy: { createdAt: 'desc' },
           take: 12 // Last 12 entries
+        }).catch(err => {
+          console.error('Error fetching subscription history:', err);
+          return []; // Return empty array on failure
         }),
+        
         // Hospital details
         prisma.hospital.findUnique({
           where: { id: hospitalId }
+        }).catch(err => {
+          console.error('Error fetching hospital details:', err);
+          throw new Error('Hospital not found'); // Critical failure
         }),
       ]);
 
-      // Calculate appointment analytics
-      const appointmentAnalytics = {
-        volumeTrends: this.calculateAppointmentVolumeTrends(appointments),
-        statusDistribution: this.calculateStatusDistribution(appointments),
-        doctorPerformance: this.calculateDoctorPerformance(appointments),
-        peakHours: this.analyzePeakHours(appointments),
-        patientFlow: this.analyzePatientFlow(appointments),
-        durationAnalysis: this.analyzeAppointmentDurations(appointments)
-      };
+      // Check if hospital exists
+      if (!hospitalDetails) {
+        throw new Error('Hospital not found');
+      }
 
-      // Calculate revenue analytics
-      const revenueAnalytics = {
-        paymentStatus: this.calculatePaymentStatusOverview(appointments),
-        paymentMethods: this.analyzePaymentMethods(appointments),
-        revenueTrends: this.calculateRevenueTrends(appointments),
-        doctorRevenue: this.calculateDoctorWiseRevenue(appointments),
-        paymentTimeline: this.analyzePaymentTimeline(appointments)
-      };
+      // Calculate analytics with defensive programming
+      let appointmentAnalytics = {};
+      try {
+        appointmentAnalytics = {
+          volumeTrends: this.calculateAppointmentVolumeTrends(appointments),
+          statusDistribution: this.calculateStatusDistribution(appointments),
+          doctorPerformance: this.calculateDoctorPerformance(appointments),
+          peakHours: this.analyzePeakHours(appointments),
+          patientFlow: this.analyzePatientFlow(appointments),
+          durationAnalysis: this.analyzeAppointmentDurations(appointments)
+        };
+      } catch (analyticsError) {
+        console.error('Error calculating appointment analytics:', analyticsError);
+        appointmentAnalytics = { error: 'Failed to calculate appointment analytics' };
+      }
 
-      // Calculate operational analytics
-      const operationalAnalytics = {
-        doctorUtilization: this.calculateDoctorUtilization(doctors, appointments),
-        scheduleEfficiency: this.analyzeScheduleEfficiency(doctors, appointments),
-        patientDemographics: this.analyzePatientDemographics(appointments),
-        visitNotesCompletion: this.analyzeVisitNotesCompletion(appointments)
-      };
+      // Calculate revenue analytics with defensive programming
+      let revenueAnalytics = {};
+      try {
+        revenueAnalytics = {
+          paymentStatus: this.calculatePaymentStatusOverview(appointments),
+          paymentMethods: this.analyzePaymentMethods(appointments),
+          revenueTrends: this.calculateRevenueTrends(appointments),
+          doctorRevenue: this.calculateDoctorWiseRevenue(appointments),
+          paymentTimeline: this.analyzePaymentTimeline(appointments)
+        };
+      } catch (revenueError) {
+        console.error('Error calculating revenue analytics:', revenueError);
+        revenueAnalytics = { error: 'Failed to calculate revenue analytics' };
+      }
 
-      // Calculate subscription analytics
-      const subscriptionAnalytics = {
-        currentStatus: subscription,
-        history: this.analyzeSubscriptionHistory(subscriptionHistory),
-        doctorTrends: this.analyzeDoctorCountTrends(subscriptionHistory),
-        billingPerformance: this.analyzeBillingCyclePerformance(subscriptionHistory)
-      };
+      // Calculate operational analytics with defensive programming
+      let operationalAnalytics = {};
+      try {
+        operationalAnalytics = {
+          doctorUtilization: this.calculateDoctorUtilization(doctors, appointments),
+          scheduleEfficiency: this.analyzeScheduleEfficiency(doctors, appointments),
+          patientDemographics: this.analyzePatientDemographics(appointments),
+          visitNotesCompletion: this.analyzeVisitNotesCompletion(appointments)
+        };
+      } catch (operationalError) {
+        console.error('Error calculating operational analytics:', operationalError);
+        operationalAnalytics = { error: 'Failed to calculate operational analytics' };
+      }
 
-      // Calculate patient experience analytics
-      const experienceAnalytics = {
-        waitTime: this.analyzeWaitTimes(appointments),
-        cancellationPatterns: this.analyzeCancellationPatterns(appointments),
-        retention: this.calculatePatientRetention(appointments),
-        completionRates: this.calculateCompletionRates(appointments)
-      };
+      // Calculate subscription analytics with defensive programming
+      let subscriptionAnalytics = {};
+      try {
+        subscriptionAnalytics = {
+          currentStatus: subscription,
+          history: this.analyzeSubscriptionHistory(subscriptionHistory),
+          doctorTrends: this.analyzeDoctorCountTrends(subscriptionHistory),
+          billingPerformance: this.analyzeBillingCyclePerformance(subscriptionHistory)
+        };
+      } catch (subscriptionError) {
+        console.error('Error calculating subscription analytics:', subscriptionError);
+        subscriptionAnalytics = { error: 'Failed to calculate subscription analytics' };
+      }
+
+      // Calculate patient experience analytics with defensive programming
+      let experienceAnalytics = {};
+      try {
+        experienceAnalytics = {
+          waitTime: this.analyzeWaitTimes(appointments),
+          cancellationPatterns: this.analyzeCancellationPatterns(appointments),
+          retention: this.calculatePatientRetention(appointments),
+          completionRates: this.calculateCompletionRates(appointments)
+        };
+      } catch (experienceError) {
+        console.error('Error calculating patient experience analytics:', experienceError);
+        experienceAnalytics = { error: 'Failed to calculate patient experience analytics' };
+      }
 
       const stats = {
         hospitalInfo: hospitalDetails,
-        doctors:doctors,
+        doctors: doctors,
         appointment: appointmentAnalytics,
         revenue: revenueAnalytics,
         operational: operationalAnalytics,
@@ -414,14 +635,26 @@ class HospitalService {
       // Cache the results
       try {
         await redisService.setCache(CACHE_KEY, stats, CACHE_EXPIRY);
-      } catch (error) {
-        console.error('Error caching dashboard stats:', error);
+      } catch (cacheError) {
+        console.error('Error caching dashboard stats:', cacheError);
+        // Non-critical error, continue without caching
       }
 
       return stats;
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
-      throw new Error('Failed to fetch dashboard statistics');
+      
+      // Handle specific errors
+      if (error.message.includes('Hospital not found')) {
+        throw new Error('Hospital not found');
+      }
+      
+      if (error.message.includes('Hospital ID is required')) {
+        throw new Error('Hospital ID is required');
+      }
+      
+      // Generic error with details for debugging
+      throw new Error(`Failed to fetch dashboard statistics: ${error.message}`);
     }
   }
 
@@ -1096,11 +1329,20 @@ class HospitalService {
   }
 
   async hospitalExistsBySupabaseId(supabaseUserId) {
-    const hospital = await prisma.hospital.findUnique({
-      where: { supabaseUserId },
-      select: { id: true }
-    });
-    return Boolean(hospital);
+    try {
+      if (!supabaseUserId) {
+        throw new Error('Supabase User ID is required');
+      }
+      
+      const hospital = await prisma.hospital.findUnique({
+        where: { supabaseUserId },
+        select: { id: true }
+      });
+      return Boolean(hospital);
+    } catch (error) {
+      console.error('Error checking if hospital exists by Supabase ID:', error);
+      throw new Error(`Failed to check hospital existence: ${error.message}`);
+    }
   }
 
 }
