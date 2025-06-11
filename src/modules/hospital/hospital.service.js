@@ -1094,6 +1094,15 @@ class HospitalService {
     const yearStart = new Date(d.getFullYear(), 0, 1);
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   }
+
+  async hospitalExistsBySupabaseId(supabaseUserId) {
+    const hospital = await prisma.hospital.findUnique({
+      where: { supabaseUserId },
+      select: { id: true }
+    });
+    return Boolean(hospital);
+  }
+
 }
 
 module.exports = new HospitalService();
