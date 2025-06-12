@@ -260,7 +260,7 @@ class RabbitMQService {
           durable: true,
           deadLetterExchange: '',
           deadLetterRoutingKey: queueName,
-          messageTtl: 7 * 24 * 60 * 60 * 1000 // 7 days retention for dead letters
+          messageTtl:  60 * 60 * 1000 // 1 hour retention for dead letters
         });
         await channel.bindQueue(dlqName, dlxName, queueName);
       }
@@ -401,6 +401,79 @@ class RabbitMQService {
   async purgeQueue(queueName) {
     const channel = await this.getChannel();
     await channel.purgeQueue(queueName);
+  }
+
+  /**
+   * Purge multiple queues at once
+   * @param {Array<string>} queueNames - Array of queue names to purge
+   * @returns {Promise<Object>} Results of purge operations
+   */
+  async purgeAllQueues(queueNames = []) {
+    try {
+      this.log('INFO', 'Starting to purge multiple queues', { queueNames });
+      
+      const results = [];
+      const errors = [];
+      
+      // Purge queues in parallel for better performance
+      const purgePromises = queueNames.map(async (queueName) => {
+        try {
+          await this.purgeQueue(queueName);
+          results.push({ queue: queueName, status: 'success' });
+          this.log('INFO', 'Queue purged successfully', { queueName });
+        } catch (error) {
+          const errorInfo = { 
+            queue: queueName, 
+            status: 'error', 
+            error: error.message 
+          };
+          errors.push(errorInfo);
+          this.log('ERROR', 'Failed to purge queue', { queueName }, error);
+        }
+      });
+
+      // Wait for all purge operations to complete
+      await Promise.allSettled(purgePromises);
+
+      const summary = {
+        totalQueues: queueNames.length,
+        successful: results.length,
+        failed: errors.length,
+        timestamp: new Date().toISOString()
+      };
+
+      this.log('INFO', 'Queue purge operation completed', summary);
+
+      return {
+        success: errors.length === 0,
+        summary,
+        results,
+        errors
+      };
+
+    } catch (error) {
+      this.log('ERROR', 'Critical error during queue purge operation', {}, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Purge all notification and appointment queues
+   * @returns {Promise<Object>} Results of purge operations
+   */
+  async purgeAllAppointmentQueues() {
+    const defaultQueues = [
+      'notifications.email',
+      'notifications.sms', 
+      'notifications.otp',
+      'notifications.whatsapp',
+      'appointments.updated',
+      'appointments.notification',
+      'notifications',
+      'appointments.created'
+    ];
+
+    return this.purgeAllQueues(defaultQueues);
   }
 
   async getQueueInfo(queueName) {

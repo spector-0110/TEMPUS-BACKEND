@@ -85,7 +85,7 @@ class MessageService {
     await setupConsumer(this.queues.whatsapp, async (message) => {
       // WhatsApp implementation
       console.log('Processing WhatsApp:', message);
-      watsappService.sendChatMessage(message.to, message.content);
+      watsappService.sendMessage(message.to, message.content);
 
       
     }, { maxRetries: 3, prefetch: 10 });
