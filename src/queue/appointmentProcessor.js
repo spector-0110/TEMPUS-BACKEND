@@ -279,16 +279,9 @@ class AppointmentProcessor {
   async sendAppointmentCreationNotification(appointment, trackingLink) {
     try {
       // Format appointment date and time for the message using IST
-      const appointmentDate = TimezoneUtil.formatDateIST(appointment.appointmentDate, { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
+      const appointmentDate = appointment.appointmentDate;
       
-      const startTime = appointment.startTime 
-        ? TimezoneUtil.formatTimeIST(appointment.startTime, { hour: '2-digit', minute: '2-digit', hour12: true })
-        : 'N/A';
+      const startTime = new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0];
       
       // Construct the WhatsApp message
       const notificationContent = `Thank you for booking an appointment with ${appointment.hospital.name}!

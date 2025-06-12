@@ -260,7 +260,7 @@ class RabbitMQService {
           durable: true,
           deadLetterExchange: '',
           deadLetterRoutingKey: queueName,
-          messageTtl:  60 * 60 * 1000 // 1 hour retention for dead letters
+          messageTtl:  24 *60 * 60 * 1000 // 24 hour retention for dead letters
         });
         await channel.bindQueue(dlqName, dlxName, queueName);
       }
