@@ -146,7 +146,7 @@ class AppointmentProcessor {
         );
 
         // Notify next patient
-        await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+        // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
       }
       
       if (notificationContent) {
