@@ -167,59 +167,59 @@ class AppointmentProcessor {
     }
   }
 
-  /**
-   * Notify the next patient in the queue when their turn is approaching
-   */
-  async notifyNextPatientInQueue(hospitalId, doctorId) {
-    try {
-      // Get today's date in IST
-      const today = TimezoneUtil.getCurrentIst();
-      today.setHours(0, 0, 0, 0);
+  // /**
+  //  * Notify the next patient in the queue when their turn is approaching
+  //  */
+  // async notifyNextPatientInQueue(hospitalId, doctorId) {
+  //   try {
+  //     // Get today's date in IST
+  //     const today = TimezoneUtil.getCurrentIst();
+  //     today.setHours(0, 0, 0, 0);
       
-      // Find next booked appointment
-      const nextAppointment = await prisma.appointment.findFirst({
-        where: {
-          hospitalId: hospitalId,
-          doctorId: doctorId,
-          appointmentDate: today,
-          status: APPOINTMENT_STATUS.BOOKED
-        },
-        include: {
-          hospital: {
-            select: {
-              name: true
-            }
-          },
-          doctor: {
-            select: {
-              name: true
-            }
-          }
-        },
-        orderBy: [
-          { paymentAt: 'asc' },
-          { createdAt: 'asc' }
-        ]
-      });
+  //     // Find next booked appointment
+  //     const nextAppointment = await prisma.appointment.findFirst({
+  //       where: {
+  //         hospitalId: hospitalId,
+  //         doctorId: doctorId,
+  //         appointmentDate: today,
+  //         status: APPOINTMENT_STATUS.BOOKED
+  //       },
+  //       include: {
+  //         hospital: {
+  //           select: {
+  //             name: true
+  //           }
+  //         },
+  //         doctor: {
+  //           select: {
+  //             name: true
+  //           }
+  //         }
+  //       },
+  //       orderBy: [
+  //         { paymentAt: 'asc' },
+  //         { createdAt: 'asc' }
+  //       ]
+  //     });
       
-      if (nextAppointment) {
-        // Get their current queue position
-        const queueInfo = await appointmentService.getQueuePosition(nextAppointment.id);
+  //     if (nextAppointment) {
+  //       // Get their current queue position
+  //       const queueInfo = await appointmentService.getQueuePosition(nextAppointment.id);
         
-        const notificationContent = `It's almost your turn! You are ${queueInfo.position === 1 ? 'next' : `${queueInfo.position}th`} in line to see Dr. ${nextAppointment.doctor.name}. Estimated waiting time: ${queueInfo.estimatedWaitingTime} minutes.`;
+  //       const notificationContent = `It's almost your turn! You are ${queueInfo.position === 1 ? 'next' : `${queueInfo.position}th`} in line to see Dr. ${nextAppointment.doctor.name}. Estimated waiting time: ${queueInfo.estimatedWaitingTime} minutes.`;
         
-        await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
-          appointmentId: nextAppointment.id,
-          name: nextAppointment.patientName,
-          mobile: nextAppointment.mobile,
-          hospitalId: nextAppointment.hospitalId,
-          content: notificationContent
-        });
-      }
-    } catch (error) {
-      console.error('Error notifying next patient:', error);
-    }
-  }
+  //       await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
+  //         appointmentId: nextAppointment.id,
+  //         name: nextAppointment.patientName,
+  //         mobile: nextAppointment.mobile,
+  //         hospitalId: nextAppointment.hospitalId,
+  //         content: notificationContent
+  //       });
+  //     }
+  //   } catch (error) {
+  //     console.error('Error notifying next patient:', error);
+  //   }
+  // }
 
   async handlePaymentStatusChange(appointment) {
     try {
