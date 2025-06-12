@@ -53,11 +53,11 @@ class AppointmentService {
       });
 
       // Purge all queues at once using the new utility method
-      const purgeResult = await rabbitmqService.purgeAllAppointmentQueues();
+      // const purgeResult = await rabbitmqService.purgeAllAppointmentQueues();
       
-      if (!purgeResult.success) {
-        console.warn('Some queues failed to purge:', purgeResult.errors);
-      }
+      // if (!purgeResult.success) {
+      //   console.warn('Some queues failed to purge:', purgeResult.errors);
+      // }
 
 
       // Return only essential information for user-facing appointment creation
