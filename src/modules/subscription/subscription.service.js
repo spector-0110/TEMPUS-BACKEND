@@ -76,7 +76,7 @@ class SubscriptionService {
 
   async calculatePrice(doctorCount, billingCycle) {
     const basePriceTotal = PRICING.BASE_PRICE_PER_DOCTOR * doctorCount;
-    
+
     // Apply volume discount
     let volumeDiscount = 0;
     for (const tier of PRICING.VOLUME_DISCOUNTS) {
@@ -84,20 +84,19 @@ class SubscriptionService {
         volumeDiscount = tier.discount;
       }
     }
-    
-    // Apply volume discount
-    const volumeDiscountAmount = volumeDiscount > 0 ? (basePriceTotal * volumeDiscount) / 100 : 0;
-    const priceAfterVolumeDiscount = basePriceTotal - volumeDiscountAmount;
-    
-    // Apply yearly discount if applicable
-    let yearlyDiscountAmount = 0;
-    if (billingCycle === 'yearly') {
-      yearlyDiscountAmount = (priceAfterVolumeDiscount * PRICING.YEARLY_DISCOUNT_PERCENTAGE) / 100;
-    }
-    
-    const finalPrice = priceAfterVolumeDiscount - yearlyDiscountAmount;
 
-    return Math.round(finalPrice * 100) / 100; // Round to 2 decimal places
+    const volumeDiscountAmount = (basePriceTotal * volumeDiscount) / 100;
+    const priceAfterVolumeDiscount = basePriceTotal - volumeDiscountAmount;
+
+    // Apply yearly discount if applicable
+    let finalPrice = priceAfterVolumeDiscount;
+
+    if (billingCycle === BILLING_CYCLE.YEARLY) {
+      const yearlyDiscountAmount = (priceAfterVolumeDiscount * PRICING.YEARLY_DISCOUNT_PERCENTAGE) / 100;
+      finalPrice = (priceAfterVolumeDiscount - yearlyDiscountAmount) * 12;
+    }
+
+    return Math.round(finalPrice * 100) / 100;
   }
 
   async getHospitalSubscription(hospitalId, statusFlag = false) {
@@ -1341,7 +1340,7 @@ _categorizeVerificationError(error) {
     if(subscription.paymentStatus !== PAYMENT_STATUS.SUCCESS) {
       return 0;
     }
-    
+
     if (currentDate < startDate) {
       return subscription.totalPrice; // Full amount remaining if subscription hasn't started
     }

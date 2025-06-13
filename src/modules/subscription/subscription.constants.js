@@ -33,7 +33,7 @@ const CACHE_EXPIRY = {
 
 const PRICING = {
   BASE_PRICE_PER_DOCTOR: 4999.99,
-  YEARLY_DISCOUNT_PERCENTAGE: 20,
+  YEARLY_DISCOUNT_PERCENTAGE: 12,
   VOLUME_DISCOUNTS: [
     { minDoctors: 10, discount: 10 },
     { minDoctors: 20, discount: 15 },
