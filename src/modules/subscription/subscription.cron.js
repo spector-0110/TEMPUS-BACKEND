@@ -26,13 +26,27 @@ class SubscriptionCronService {
       this.sendExpiryWarnings();
     });
 
-    // Run monitoring tasks every 15 minutes
-    this.monitoringJob = cron.schedule('*/15 * * * *', async () => {
+    // Run monitoring tasks every 10 minutes for faster cleanup of stuck renewals
+    this.monitoringJob = cron.schedule('*/10 * * * *', async () => {
       try {
         console.info('Running subscription monitoring tasks...');
-        await monitoringService.runMonitoringTasks();
+        const startTime = Date.now();
+        const results = await monitoringService.runMonitoringTasks();
+        const duration = Date.now() - startTime;
+        
+        console.info('Subscription monitoring tasks completed', {
+          duration: `${duration}ms`,
+          stuckRenewalsProcessed: results.stuckRenewals?.processed || 0,
+          stuckRenewalsTotal: results.stuckRenewals?.total || 0,
+          systemHealth: results.systemHealth?.status || 'unknown',
+          timestamp: new Date().toISOString()
+        });
       } catch (error) {
-        console.error('Error in subscription monitoring cron job:', error);
+        console.error('Error in subscription monitoring cron job:', {
+          error: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString()
+        });
       }
     });
 

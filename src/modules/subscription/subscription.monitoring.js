@@ -33,19 +33,52 @@ class SubscriptionMonitoringService {
           }
         },
         include: {
-          subscription: true
+          subscription: true,
+          hospital: {
+            select: {
+              id: true,
+              name: true,
+              adminEmail: true
+            }
+          }
         }
       });
 
       console.info(`Found ${stuckRenewals.length} stuck renewal(s) to cleanup`, {
+        timestamp: new Date().toISOString(),
+        cutoffTime: thirtyMinutesAgo.toISOString()
+      });
+
+      let processedCount = 0;
+      let failedCount = 0;
+
+      for (const renewal of stuckRenewals) {
+        try {
+          await this.handleStuckRenewal(renewal);
+          processedCount++;
+        } catch (error) {
+          console.error(`Failed to process stuck renewal ${renewal.id}:`, {
+            renewalId: renewal.id,
+            hospitalId: renewal.hospitalId,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+          failedCount++;
+        }
+      }
+
+      const result = { 
+        total: stuckRenewals.length,
+        processed: processedCount, 
+        failed: failedCount 
+      };
+
+      console.info('Completed stuck renewals cleanup', {
+        result,
         timestamp: new Date().toISOString()
       });
 
-      for (const renewal of stuckRenewals) {
-        await this.handleStuckRenewal(renewal);
-      }
-
-      return { cleaned: stuckRenewals.length };
+      return result;
     } catch (error) {
       console.error('Failed to cleanup stuck renewals', {
         error: error.message,
@@ -58,6 +91,15 @@ class SubscriptionMonitoringService {
 
   async handleStuckRenewal(renewal) {
     try {
+      console.info(`Processing stuck renewal ${renewal.id}`, {
+        renewalId: renewal.id,
+        hospitalId: renewal.hospitalId,
+        hospitalName: renewal.hospital?.name,
+        createdAt: renewal.createdAt,
+        razorpayOrderId: renewal.razorpayOrderId,
+        timestamp: new Date().toISOString()
+      });
+
       // Check if payment was actually processed via Razorpay API
       if (renewal.razorpayOrderId) {
         const getRazorpayInstance = require('../../config/razorpay.config');
@@ -66,88 +108,176 @@ class SubscriptionMonitoringService {
         try {
           const orderDetails = await razorpay.orders.fetch(renewal.razorpayOrderId);
           
+          console.info(`Razorpay order status for renewal ${renewal.id}:`, {
+            renewalId: renewal.id,
+            razorpayOrderId: renewal.razorpayOrderId,
+            orderStatus: orderDetails.status,
+            orderAmount: orderDetails.amount,
+            amountPaid: orderDetails.amount_paid,
+            timestamp: new Date().toISOString()
+          });
+          
           if (orderDetails.status === 'paid') {
-            console.warn('Found paid order that was not processed', {
+            console.warn('Found paid order that was not processed - requires manual verification', {
               renewalId: renewal.id,
               razorpayOrderId: renewal.razorpayOrderId,
-              hospitalId: renewal.hospitalId
+              hospitalId: renewal.hospitalId,
+              hospitalName: renewal.hospital?.name,
+              adminEmail: renewal.hospital?.adminEmail
             });
             
             // This needs manual verification - mark for admin review
-            await this.markForAdminReview(renewal, 'PAID_BUT_NOT_PROCESSED');
+            await this.markForAdminReview(renewal, 'PAID_BUT_NOT_PROCESSED', {
+              razorpayStatus: orderDetails.status,
+              razorpayAmount: orderDetails.amount,
+              razorpayAmountPaid: orderDetails.amount_paid
+            });
+          } else if (orderDetails.status === 'created' || orderDetails.status === 'attempted') {
+            // Order was created but never paid, safe to mark as failed
+            await this.markRenewalAsFailed(renewal, 'TIMEOUT_UNPAID', {
+              razorpayStatus: orderDetails.status,
+              timeoutMinutes: Math.floor((Date.now() - new Date(renewal.createdAt).getTime()) / (1000 * 60))
+            });
           } else {
-            // Order was never paid, safe to mark as failed
-            await this.markRenewalAsFailed(renewal, 'TIMEOUT_UNPAID');
+            // Other statuses (failed, etc.)
+            await this.markRenewalAsFailed(renewal, 'RAZORPAY_ORDER_FAILED', {
+              razorpayStatus: orderDetails.status
+            });
           }
         } catch (razorpayError) {
           console.error('Failed to fetch order details from Razorpay', {
             renewalId: renewal.id,
             razorpayOrderId: renewal.razorpayOrderId,
-            error: razorpayError.message
+            error: razorpayError.message,
+            errorCode: razorpayError.error?.code,
+            statusCode: razorpayError.statusCode
           });
           
-          // Mark for manual review if we can't verify
-          await this.markForAdminReview(renewal, 'RAZORPAY_API_ERROR');
+          // If it's a 404 or similar, the order might not exist
+          if (razorpayError.statusCode === 404) {
+            await this.markRenewalAsFailed(renewal, 'RAZORPAY_ORDER_NOT_FOUND', {
+              error: razorpayError.message
+            });
+          } else {
+            // Mark for manual review if we can't verify due to API issues
+            await this.markForAdminReview(renewal, 'RAZORPAY_API_ERROR', {
+              error: razorpayError.message,
+              errorCode: razorpayError.error?.code,
+              statusCode: razorpayError.statusCode
+            });
+          }
         }
       } else {
         // No Razorpay order ID, safe to mark as failed
-        await this.markRenewalAsFailed(renewal, 'NO_PAYMENT_INITIATED');
+        console.info(`No Razorpay order ID found for renewal ${renewal.id}, marking as failed`);
+        await this.markRenewalAsFailed(renewal, 'NO_PAYMENT_INITIATED', {
+          timeoutMinutes: Math.floor((Date.now() - new Date(renewal.createdAt).getTime()) / (1000 * 60))
+        });
       }
     } catch (error) {
       console.error('Failed to handle stuck renewal', {
         renewalId: renewal.id,
+        hospitalId: renewal.hospitalId,
         error: error.message,
+        stack: error.stack,
         timestamp: new Date().toISOString()
       });
+      
+      // Re-throw to be caught by the calling function
+      throw error;
     }
   }
 
-  async markRenewalAsFailed(renewal, reason) {
-    await prisma.subscriptionHistory.update({
-      where: { id: renewal.id },
-      data: {
-        paymentStatus: PAYMENT_STATUS.FAILED,
-        paymentDetails: {
-          failureReason: reason,
-          failedAt: new Date().toISOString(),
-          autoFailedByMonitoring: true
-        }
-      }
-    });
+  async markRenewalAsFailed(renewal, reason, additionalData = {}) {
+    try {
+      // Use transaction to ensure data consistency
+      await prisma.$transaction(async (tx) => {
+        // Update the subscription history
+        await tx.subscriptionHistory.update({
+          where: { id: renewal.id },
+          data: {
+            paymentStatus: PAYMENT_STATUS.FAILED,
+            paymentDetails: {
+              ...(renewal.paymentDetails || {}),
+              failureReason: reason,
+              failedAt: new Date().toISOString(),
+              autoFailedByMonitoring: true,
+              ...additionalData
+            }
+          }
+        });
 
-    console.info('Marked stuck renewal as failed', {
-      renewalId: renewal.id,
-      hospitalId: renewal.hospitalId,
-      reason,
-      timestamp: new Date().toISOString()
-    });
+        // Also update the main subscription status if it's still pending
+        if (renewal.subscription && renewal.subscription.paymentStatus === PAYMENT_STATUS.PENDING) {
+          await tx.hospitalSubscription.update({
+            where: { id: renewal.subscriptionId },
+            data: {
+              paymentStatus: PAYMENT_STATUS.FAILED
+            }
+          });
+        }
+      });
+
+      console.info('Marked stuck renewal as failed', {
+        renewalId: renewal.id,
+        hospitalId: renewal.hospitalId,
+        hospitalName: renewal.hospital?.name,
+        reason,
+        additionalData,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Failed to mark renewal as failed', {
+        renewalId: renewal.id,
+        hospitalId: renewal.hospitalId,
+        reason,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+      throw error;
+    }
   }
 
-  async markForAdminReview(renewal, issue) {
-    // Update with admin review flag
-    await prisma.subscriptionHistory.update({
-      where: { id: renewal.id },
-      data: {
-        paymentDetails: {
-          ...renewal.paymentDetails,
-          requiresAdminReview: true,
-          reviewReason: issue,
-          flaggedAt: new Date().toISOString()
+  async markForAdminReview(renewal, issue, additionalData = {}) {
+    try {
+      // Update with admin review flag
+      await prisma.subscriptionHistory.update({
+        where: { id: renewal.id },
+        data: {
+          paymentDetails: {
+            ...(renewal.paymentDetails || {}),
+            requiresAdminReview: true,
+            reviewReason: issue,
+            flaggedAt: new Date().toISOString(),
+            ...additionalData
+          }
         }
-      }
-    });
+      });
 
-    // Send alert to admin (implement based on your notification system)
-    console.error('ADMIN REVIEW REQUIRED: Subscription renewal issue', {
-      renewalId: renewal.id,
-      hospitalId: renewal.hospitalId,
-      issue,
-      razorpayOrderId: renewal.razorpayOrderId,
-      timestamp: new Date().toISOString()
-    });
+      // Send alert to admin (implement based on your notification system)
+      console.error('ADMIN REVIEW REQUIRED: Subscription renewal issue', {
+        renewalId: renewal.id,
+        hospitalId: renewal.hospitalId,
+        hospitalName: renewal.hospital?.name,
+        adminEmail: renewal.hospital?.adminEmail,
+        issue,
+        razorpayOrderId: renewal.razorpayOrderId,
+        additionalData,
+        timestamp: new Date().toISOString()
+      });
 
-    // Could integrate with alerting service here
-    // await this.sendAdminAlert(renewal, issue);
+      // TODO: Integrate with alerting service here
+      // await this.sendAdminAlert(renewal, issue, additionalData);
+    } catch (error) {
+      console.error('Failed to mark for admin review', {
+        renewalId: renewal.id,
+        hospitalId: renewal.hospitalId,
+        issue,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+      throw error;
+    }
   }
 
   // Monitor Redis locks and release orphaned ones
