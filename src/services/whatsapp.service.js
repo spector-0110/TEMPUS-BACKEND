@@ -7,7 +7,7 @@ class WhatsAppService {
     this.accountSid = twilioConfig.accountSid;
     this.authToken = twilioConfig.authToken;
     this.twilioPhoneNumber = twilioConfig.whatsapp.phoneNumber;
-    
+    console.log("-------------", twilioConfig.whatsapp.phoneNumber, "--------", this.accountSid, "-------",this.authToken);
     // Initialize Twilio client
     this.client = twilio(this.accountSid, this.authToken);
   }
@@ -135,7 +135,6 @@ class WhatsAppService {
     };
     
     const logKey = `whatsapp_log:${Date.now()}`;
-    await this.redis.setex(logKey, 86400, JSON.stringify(logData)); // 24 hours retention
     
     console.log('WhatsApp Message Log:', logData);
   }

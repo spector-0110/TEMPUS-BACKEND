@@ -138,12 +138,12 @@ class AppointmentProcessor {
       } else if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
         notificationContent = this.generateCompletionMessage(appointment);
         
-        // Update queue positions after completion
-        await appointmentService.updateQueuePositions(
-          appointment.hospitalId,
-          appointment.doctorId,
-          appointment.appointmentDate
-        );
+        // // Update queue positions after completion
+        // await appointmentService.updateQueuePositions(
+        //   appointment.hospitalId,
+        //   appointment.doctorId,
+        //   appointment.appointmentDate
+        // );
 
         // Notify next patient
         // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
