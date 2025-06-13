@@ -377,7 +377,7 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
       }
 
       // Calculate pricing and dates
-      const { startDate, endDate, totalPrice, amountInPaise } = await this.calculateRenewalDetails(
+      const { startDate, endDate, amountInPaise ,finalPriceWithCharges} = await this.calculateRenewalDetails(
         doctorCount, 
         billingCycle,
         currentSub
@@ -388,7 +388,7 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
         razorpay,
         hospitalId,
         amountInPaise,
-        { doctorCount, billingCycle, totalPrice, startDate, endDate, paymentMethod, paymentDetails }
+        { doctorCount, billingCycle, finalPriceWithCharges, startDate, endDate, paymentMethod, paymentDetails }
       );
 
       // Create subscription history record
@@ -399,7 +399,7 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
           razorpayOrderId: razorpayOrder.id,
           doctorCount,
           billingCycle,
-          totalPrice,
+          finalPriceWithCharges,
           paymentStatus: PAYMENT_STATUS.PENDING,
           startDate,
           endDate,
