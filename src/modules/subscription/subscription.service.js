@@ -379,7 +379,8 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
       // Calculate pricing and dates
       const { startDate, endDate, totalPrice, amountInPaise } = await this.calculateRenewalDetails(
         doctorCount, 
-        billingCycle
+        billingCycle,
+        currentSub
       );
 
       // Create Razorpay order
@@ -529,7 +530,8 @@ async validateRazorpayOrder(razorpay, orderId) {
 }
 
 // Helper method to calculate renewal details
-async calculateRenewalDetails(doctorCount, billingCycle) {
+// Helper method to calculate renewal details
+async calculateRenewalDetails(doctorCount, billingCycle, currentSub) {
   const startDate = new Date();
   const endDate = new Date(startDate);
   
@@ -539,10 +541,59 @@ async calculateRenewalDetails(doctorCount, billingCycle) {
     endDate.setFullYear(endDate.getFullYear() + 1);
   }
 
+  // Calculate the full price for the new subscription period
   const totalPrice = await this.calculatePrice(doctorCount, billingCycle);
-  const amountInPaise = Math.round(totalPrice * 100);
+  
+  // Get any remaining amount from the current subscription
+  const remaining = await this.calculateRemainingAmount(currentSub);
+  const remainingPrice = remaining ? remaining.remainingAmount : 0;
+  
+  // Store the original price before adjusting for remaining credit
+  let finalPrice = totalPrice;
+  let priceBeforePlatformCharges = totalPrice;
+  
+  // Adjust final price by subtracting any remaining amount from the current subscription
+  if (remainingPrice > 0) {
+    // Even if remainingPrice fully covers the totalPrice, we'll still need to process platform charges
+    priceBeforePlatformCharges = Math.max(0, totalPrice - remainingPrice);
+  }
 
-  return { startDate, endDate, totalPrice, amountInPaise };
+  // Calculate Razorpay charges on original amount
+  // Platform fee is 2% + GST (18% on platform fee)
+  const platformFeePercentage = 2;
+  const gstPercentage = 18;
+  
+  // Calculate platform charges based on the original amount before credit
+  const platformFee = (totalPrice * platformFeePercentage) / 100;
+  const gstOnPlatformFee = (platformFee * gstPercentage) / 100;
+  const totalPlatformCharges = platformFee + gstOnPlatformFee;
+
+  // Add platform charges to adjusted price
+  const finalPriceWithCharges = Math.max(1, priceBeforePlatformCharges + totalPlatformCharges);
+
+  // Convert to paise (Indian currency smallest unit) for Razorpay
+  // Ensure minimum amount is 100 paise (₹1) as Razorpay doesn't accept 0
+  const amountInPaise = Math.round(finalPriceWithCharges * 100);
+
+  return { 
+    startDate, 
+    endDate, 
+    totalPrice: totalPrice, // Original price before any adjustments
+    priceAfterCredit: priceBeforePlatformCharges,
+    platformFee,
+    gstOnPlatformFee,
+    totalPlatformCharges,
+    finalPriceWithCharges,
+    amountInPaise,
+    remainingCredit: remainingPrice,
+    breakdown: {
+      originalPrice: totalPrice,
+      creditApplied: remainingPrice,
+      priceAfterCredit: priceBeforePlatformCharges,
+      platformCharges: totalPlatformCharges,
+      finalAmount: finalPriceWithCharges
+    }
+  };
 }
 
 // Helper method to create Razorpay order with retry logic
