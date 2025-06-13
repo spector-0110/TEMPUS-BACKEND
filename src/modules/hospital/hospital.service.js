@@ -599,6 +599,7 @@ class HospitalService {
       try {
         subscriptionAnalytics = {
           currentStatus: subscription,
+          subscriptionUsage:await subscriptionService.calculateRemainingAmount(subscription),
           history: this.analyzeSubscriptionHistory(subscriptionHistory),
           doctorTrends: this.analyzeDoctorCountTrends(subscriptionHistory),
           billingPerformance: this.analyzeBillingCyclePerformance(subscriptionHistory)

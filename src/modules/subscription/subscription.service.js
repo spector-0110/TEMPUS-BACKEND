@@ -1327,6 +1327,61 @@ _categorizeVerificationError(error) {
       return updatedSubscription;
     });
   }
+
+  async calculateRemainingAmount(subscription) {
+    if (!subscription) {
+      throw new Error('Subscription is required');
+    }
+
+    const currentDate = new Date();
+    const startDate = new Date(subscription.startDate);
+    const endDate = new Date(subscription.endDate);
+
+    // Validate dates
+    if(subscription.paymentStatus !== PAYMENT_STATUS.SUCCESS) {
+      return 0;
+    }
+    
+    if (currentDate < startDate) {
+      return subscription.totalPrice; // Full amount remaining if subscription hasn't started
+    }
+
+    if (currentDate >= endDate) {
+      return 0; // No amount remaining if subscription has ended
+    }
+
+    // Calculate total subscription duration in days
+    const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+    
+    // Calculate remaining days
+    const remainingDays = Math.ceil((endDate - currentDate) / (1000 * 60 * 60 * 24));
+    
+    // Calculate daily rate
+    const dailyRate = subscription.totalPrice / totalDays;
+    
+    // Calculate remaining amount
+    const remainingAmount = Math.round((dailyRate * remainingDays) * 100) / 100;
+
+    const data={
+      remainingAmount,
+      totalDays,
+      remainingDays,
+      dailyRate,
+      subscriptionDetails: {
+        doctorCount: subscription.doctorCount,
+        billingCycle: subscription.billingCycle,
+        totalPrice: subscription.totalPrice,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      },
+      usageMetrics: {
+        percentageUsed: Math.round(((totalDays - remainingDays) / totalDays) * 100),
+        percentageRemaining: Math.round((remainingDays / totalDays) * 100),
+        daysUsed: totalDays - remainingDays
+      }
+    };
+    return data;
+  }
 }
 
 module.exports = new SubscriptionService();
