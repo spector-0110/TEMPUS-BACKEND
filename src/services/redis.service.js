@@ -396,18 +396,26 @@ class RedisService {
     return true;
   }
 
-  async setCache(key, value, expireSeconds = 3600) {
+  async setCache(key, value, expireSeconds = 3600, flag = null) {
     let retries = 0;
     const val = typeof value === 'object' ? JSON.stringify(value) : value;
 
     while (retries < this.MAX_RETRIES) {
       try {
         const client = await this.getClient();
-        const multi = client.multi();
-        multi.set(key, val);
-        multi.expire(key, expireSeconds);
-        await multi.exec();
-        return true;
+        
+        if (flag === 'NX') {
+          // Use SET with NX flag for distributed locking
+          const result = await client.set(key, val, 'EX', expireSeconds, 'NX');
+          return result === 'OK';
+        } else {
+          // Original behavior for normal caching
+          const multi = client.multi();
+          multi.set(key, val);
+          multi.expire(key, expireSeconds);
+          await multi.exec();
+          return true;
+        }
       } catch (err) {
         retries++;
         if (retries >= this.MAX_RETRIES) throw err;
@@ -466,7 +474,7 @@ class RedisService {
     const keys = await client.keys(pattern);
     if (keys.length > 0) await client.del(...keys);
     return true;
-  }
+ }
 
   // Pub/Sub
   async publish(channel, message) {
@@ -540,6 +548,31 @@ class RedisService {
     if (this.subscriberClient) await this.subscriberClient.quit();
     this.clients.clear();
     this.info('Cleaned up all Redis clients');
+  }
+
+  async scanAndDelete(pattern) {
+    const client = await this.getClient();
+    let cursor = '0';
+    let deletedCount = 0;
+
+    try {
+      do {
+        // Scan keys in batches
+        const [nextCursor, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+        
+        // Delete found keys in this batch
+        if (keys.length > 0) {
+          await client.del(...keys);
+          deletedCount += keys.length;
+        }
+      } while (cursor !== '0');
+
+      return deletedCount;
+    } catch (error) {
+      console.error('Error in scanAndDelete:', error);
+      throw error;
+    }
   }
 }
 

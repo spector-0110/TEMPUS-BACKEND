@@ -86,10 +86,31 @@ class MailService {
   }
 
   validateEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email) {
+      throw new Error('Email address is required');
+    }
+
+    // Trim the email to remove any whitespace
+    email = email.trim();
+
+    // More comprehensive email regex that follows RFC 5322 standard
+    const emailRegex = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+
     if (!emailRegex.test(email)) {
       throw new Error('Invalid email format');
     }
+
+    // Check length constraints
+    if (email.length > 254) { // Maximum length for an email address
+      throw new Error('Email address is too long');
+    }
+
+    // Check local part length
+    const localPart = email.split('@')[0];
+    if (localPart.length > 64) { // Maximum length for local part
+      throw new Error('Local part of email is too long');
+    }
+
     return true;
   }
 

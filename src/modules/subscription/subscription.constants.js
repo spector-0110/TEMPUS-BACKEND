@@ -32,12 +32,12 @@ const CACHE_EXPIRY = {
 };
 
 const PRICING = {
-  BASE_PRICE_PER_DOCTOR: 5999.99,  // Base price per doctor per month
-  YEARLY_DISCOUNT_PERCENTAGE: 20, // 20% discount for yearly subscriptions
+  BASE_PRICE_PER_DOCTOR: 4999.99,
+  YEARLY_DISCOUNT_PERCENTAGE: 20,
   VOLUME_DISCOUNTS: [
-    { minDoctors: 50, discount: 10 },  // 10% discount for 50+ doctors
-    { minDoctors: 100, discount: 15 }, // 15% discount for 100+ doctors
-    { minDoctors: 200, discount: 20 }, // 20% discount for 200+ doctors
+    { minDoctors: 10, discount: 10 },
+    { minDoctors: 20, discount: 15 },
+    { minDoctors: 50, discount: 20 },
   ]
 };
 

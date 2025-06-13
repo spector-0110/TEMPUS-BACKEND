@@ -69,6 +69,7 @@ class SubscriptionController {
   async createRenewSubscription(req, res) {
   try {
     const { billingCycle, updatedDoctorsCount } = req.body;
+    const clientIp = req.ip || req.connection.remoteAddress;
 
     if (!req.user || !req.user.hospital_id) {
       throw new Error('Hospital ID is missing or invalid');
@@ -78,6 +79,9 @@ class SubscriptionController {
       req.user.hospital_id,
       billingCycle, 
       updatedDoctorsCount,
+      null, // paymentMethod
+      null, // paymentDetails
+      clientIp
     );
 
     return res.status(200).json({
@@ -96,8 +100,8 @@ class SubscriptionController {
 
   async verifySubscription(req, res) {
     try{
-
       const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+      const clientIp = req.ip || req.connection.remoteAddress;
 
       if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
         return res.status(400).json({
@@ -111,7 +115,8 @@ class SubscriptionController {
         req.user.hospital_id,
         razorpay_order_id,
         razorpay_payment_id,
-        razorpay_signature
+        razorpay_signature,
+        clientIp
       );
 
       return res.status(200).json({
@@ -119,10 +124,19 @@ class SubscriptionController {
         data: data
       }); 
 
-    }catch(error){
+    } catch(error) {
+      console.error('Payment verification failed:', {
+        hospitalId: req.user.hospital_id,
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
 
+      return res.status(400).json({
+        success: false,
+        error: error.message || 'Payment verification failed'
+      });
     }
-
   }
 
   async cancelSubscription(req, res) {

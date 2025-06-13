@@ -63,6 +63,7 @@ class MessageService {
     // Email queue consumer
     await setupConsumer(this.queues.email, async (message) => {
       const { to, subject, content, hospitalId } = message;
+      console.log('Processing email:', message);
       await mailService.sendMail(to, subject, content, hospitalId);
     }, { maxRetries: 3, prefetch: 10 });
   

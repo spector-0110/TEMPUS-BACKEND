@@ -22,7 +22,6 @@ const authMiddleware = async (req, res, next) => {
     if (!isInitialRegistration) {
       const hospital = await prisma.hospital.findUnique({
         where: { supabaseUserId: user.id },
-        select: { id: true }
       });
       
       if (!hospital) {

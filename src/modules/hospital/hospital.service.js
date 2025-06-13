@@ -446,12 +446,12 @@ class HospitalService {
     }
   }
 
+
   async getDashboardStats(hospitalId) {
     try {
       if (!hospitalId) {
         throw new Error('Hospital ID is required');
-      }
-      
+      }      
       // Try to get stats from cache first
       const CACHE_KEY = `hospital:dashboard:${hospitalId}`;
       const CACHE_EXPIRY = 600; // 10 minutes cache
@@ -1198,7 +1198,8 @@ class HospitalService {
         upgrades: 0,
         downgrades: 0,
         renewals: 0,
-        totalTransactions: 0
+        totalTransactions: 0,
+        history: []
       };
     }
 
@@ -1224,17 +1225,35 @@ class HospitalService {
       }
     }
 
+    const history = sortedHistory.map(sub => ({
+      id: sub.id,
+      subscriptionId: sub.subscriptionId,
+      hospitalId: sub.hospitalId,
+      doctorCount: sub.doctorCount,
+      billingCycle: sub.billingCycle,
+      totalPrice: sub.totalPrice,
+      startDate: sub.startDate,
+      endDate: sub.endDate,
+      paymentStatus: sub.paymentStatus,
+      paymentMethod: sub.paymentMethod,
+      // Simplified payment details
+      paymentDetails: sub.paymentDetails ? {
+        id: sub.paymentDetails.id,
+        amount: sub.paymentDetails.amount,
+        method: sub.paymentDetails.method,
+        status: sub.paymentDetails.status,
+        email: sub.paymentDetails.email,
+        contact: sub.paymentDetails.contact,
+      } : null,
+      createdAt: sub.createdAt
+    }));
+
     return {
       upgrades,
       downgrades,
       renewals,
       totalTransactions: sortedHistory.length,
-      latestPlan: sortedHistory[sortedHistory.length - 1],
-      subscriptionTimeline: sortedHistory.map(sub => ({
-        date: sub.createdAt,
-        doctorCount: sub.doctorCount,
-        planType: sub.planType
-      }))
+      history
     };
   }
 

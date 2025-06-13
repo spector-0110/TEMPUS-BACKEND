@@ -2,12 +2,17 @@ const cron = require('node-cron');
 const { prisma } = require('../../services/database.service');
 const mailService = require('../../services/mail.service');
 const subscriptionService = require('./subscription.service');
+const monitoringService = require('./subscription.monitoring');
+const rateLimiter = require('../../utils/rate-limiter.util');
 const { SUBSCRIPTION_STATUS, SUBSCRIPTION_EXPIRY_WARNING_DAYS } = require('./subscription.constants');
 
 class SubscriptionCronService {
   constructor() {
     this.expiredSubscriptionsJob = null;
     this.expiryWarningsJob = null;
+    this.monitoringJob = null;
+    this.healthCheckJob = null;
+    this.cleanupJob = null;
   }
 
   startCronJobs() {
@@ -21,7 +26,42 @@ class SubscriptionCronService {
       this.sendExpiryWarnings();
     });
 
-    console.log(' Subscription cron jobs scheduled');
+    // Run monitoring tasks every 15 minutes
+    this.monitoringJob = cron.schedule('*/15 * * * *', async () => {
+      try {
+        console.info('Running subscription monitoring tasks...');
+        await monitoringService.runMonitoringTasks();
+      } catch (error) {
+        console.error('Error in subscription monitoring cron job:', error);
+      }
+    });
+
+    // System health check every hour
+    this.healthCheckJob = cron.schedule('0 * * * *', async () => {
+      try {
+        const health = await monitoringService.getSystemHealth();
+        console.info('Subscription system health check:', health);
+        
+        if (health.status === 'unhealthy') {
+          console.error('CRITICAL: Subscription system is unhealthy', health);
+          // Could send alerts here
+        }
+      } catch (error) {
+        console.error('Error in health check cron job:', error);
+      }
+    });
+
+    // Rate limiter cleanup every 6 hours
+    this.cleanupJob = cron.schedule('0 */6 * * *', async () => {
+      try {
+        console.info('Running rate limiter cleanup...');
+        await rateLimiter.cleanup();
+      } catch (error) {
+        console.error('Error in rate limiter cleanup cron job:', error);
+      }
+    });
+
+    console.log('All subscription cron jobs scheduled');
   }
 
   stopCronJobs() {
@@ -31,7 +71,16 @@ class SubscriptionCronService {
     if (this.expiryWarningsJob) {
       this.expiryWarningsJob.stop();
     }
-    console.log('Subscription cron jobs stopped');
+    if (this.monitoringJob) {
+      this.monitoringJob.stop();
+    }
+    if (this.healthCheckJob) {
+      this.healthCheckJob.stop();
+    }
+    if (this.cleanupJob) {
+      this.cleanupJob.stop();
+    }
+    console.log('All subscription cron jobs stopped');
   }
 
   async checkExpiredSubscriptions() {
