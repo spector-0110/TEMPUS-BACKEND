@@ -134,9 +134,9 @@ class AppointmentProcessor {
       let notificationContent = '';
       
       if (appointment.status === APPOINTMENT_STATUS.CANCELLED) {
-        notificationContent = `Your appointment with Dr. ${appointment.doctor.name} has been cancelled.`;
+        notificationContent = this.generateCancellationMessage(appointment, previousStatus);
       } else if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
-        notificationContent = `Thank you for visiting Dr. ${appointment.doctor.name}. We hope you had a good experience.`;
+        notificationContent = this.generateCompletionMessage(appointment);
         
         // Update queue positions after completion
         await appointmentService.updateQueuePositions(
@@ -147,6 +147,10 @@ class AppointmentProcessor {
 
         // Notify next patient
         // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
+      } else if (appointment.status === APPOINTMENT_STATUS.MISSED) {
+        notificationContent = this.generateMissedAppointmentMessage(appointment);
+      } else if (appointment.status === APPOINTMENT_STATUS.BOOKED && previousStatus !== APPOINTMENT_STATUS.BOOKED) {
+        notificationContent = this.generateRebookedMessage(appointment, previousStatus);
       }
       
       if (notificationContent) {
@@ -225,7 +229,7 @@ class AppointmentProcessor {
     try {
       // Generate notification if needed
       if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID) {
-        const notificationContent = `Payment received for your appointment with Dr. ${appointment.doctor.name} at ${appointment.hospital.name}. Thank you!`;
+        const notificationContent = this.generatePaymentConfirmationMessage(appointment);
         
         // Queue notification
         await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
@@ -243,9 +247,8 @@ class AppointmentProcessor {
 
   async handleAppointmentDeletion(appointment) {
     try {      
-
       // Send cancellation notification
-      const notificationContent = `Your appointment with Dr. ${appointment.doctor.name} on ${new Date(appointment.appointmentDate).toLocaleDateString()} has been cancelled.`;
+      const notificationContent = this.generateDeletionMessage(appointment);
       
       // Queue notification
       await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
@@ -278,26 +281,10 @@ class AppointmentProcessor {
 
   async sendAppointmentCreationNotification(appointment, trackingLink) {
     try {
-      // Format appointment date and time for the message using IST
-      const appointmentDate = appointment.appointmentDate;
-      
-      const startTime = new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0];
-      
       // Construct the WhatsApp message
-      const notificationContent = `Thank you for booking an appointment with ${appointment.hospital.name}!
+      const notificationContent = this.generateCreationMessage(appointment, trackingLink);
+      console.log(`Appointment creation notification  ${appointment.mobile} for appointment ${appointment.id} ${notificationContent }`);
 
-        Your appointment with Dr. ${appointment.doctor.name} is confirmed for ${appointmentDate} at ${startTime}.
-
-        Track your appointment queue status: ${trackingLink}
-        • Check your position in the queue
-        • See how many patients are ahead of you
-        • Get notified when it's your turn
-        • View the full day's appointment schedule
-
-        Need to reschedule or cancel? Click the tracking link above.
-
-        We look forward to seeing you!`;
-      
       // Send WhatsApp message
       await messageService.sendMessage('whatsapp', {
         to: appointment.mobile,
@@ -305,7 +292,6 @@ class AppointmentProcessor {
         content: notificationContent
       });
       
-      console.log(`Appointment creation notification sent to ${appointment.mobile} for appointment ${appointment.id}`);
     } catch (error) {
       console.error('Error sending appointment creation notification:', error);
       // Don't throw - notification failure shouldn't break appointment creation processing
@@ -314,6 +300,7 @@ class AppointmentProcessor {
 
   async sendNotification(message) {
     try {
+      console.log(`Sending notification for appointment ${message}`);
       // Send WhatsApp notification
       await messageService.sendMessage('whatsapp', {
         to: message.mobile,
@@ -323,6 +310,337 @@ class AppointmentProcessor {
     } catch (error) {
       console.error('Error sending appointment notification:', error);
     }
+  }
+
+  /**
+   * Generate professional appointment creation message
+   */
+  generateCreationMessage(appointment, trackingLink) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
+    const endTime = appointment.endTime ? new Date(appointment.endTime).toISOString().split('T')[1].split('.')[0] : '';
+    
+    // Build payment status info
+    let paymentInfo = '';
+    if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID) {
+      paymentInfo = `✅ Payment Status: Confirmed`;
+      if (appointment.paymentMethod) {
+        paymentInfo += ` (${appointment.paymentMethod.toUpperCase()})`;
+      }
+      if (appointment.amount) {
+        paymentInfo += `\n💰 Amount Paid: ₹${appointment.amount}`;
+      }
+    } else {
+      paymentInfo = `⏳ Payment Status: Pending`;
+      if (appointment.amount) {
+        paymentInfo += `\n💰 Amount: ₹${appointment.amount}`;
+      }
+    }
+
+    // Build doctor info
+    let doctorInfo = `👨‍⚕️ Doctor: Dr. ${appointment.doctor.name}`;
+    if (appointment.doctor.specialization) {
+      doctorInfo += `\n🩺 Specialization: ${appointment.doctor.specialization}`;
+    }
+    if (appointment.doctor.qualification) {
+      doctorInfo += `\n🎓 Qualification: ${appointment.doctor.qualification}`;
+    }
+    if (appointment.doctor.experience) {
+      doctorInfo += `\n📅 Experience: ${appointment.doctor.experience} years`;
+    }
+
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+Your appointment has been successfully booked!
+
+📋 APPOINTMENT DETAILS:
+• Appointment ID: ${appointment.id}
+• Date: ${appointmentDate}
+• Time: ${startTime}${endTime ? ` - ${endTime}` : ''}
+• Patient Name: ${appointment.patientName}
+• Mobile: ${appointment.mobile}
+${appointment.age ? `• Age: ${appointment.age} years` : ''}
+
+${doctorInfo}
+
+${paymentInfo}
+
+🔗 TRACK YOUR APPOINTMENT:
+${trackingLink}
+
+📱 What you can do:
+• Check your position in the queue
+• See how many patients are ahead of you
+• Get notified when it's your turn
+• View the full day's appointment schedule
+• Reschedule or cancel if needed
+
+📍 Hospital Information:
+${appointment.hospital.address ? JSON.stringify(appointment.hospital.address).replace(/[{}\"]/g, '') : 'Address available at hospital'}
+
+We look forward to providing you with excellent healthcare services!
+
+For any queries, please contact the hospital reception.`;
+  }
+
+  /**
+   * Generate professional appointment cancellation message
+   */
+  generateCancellationMessage(appointment, previousStatus) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
+    
+    // Build refund information if payment was made
+    let refundInfo = '';
+    if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID && appointment.amount) {
+      refundInfo = `\n💰 REFUND INFORMATION:
+• Paid Amount: ₹${appointment.amount}
+• Refund will be processed within 5-7 business days
+• Refund will be credited to the original payment method`;
+    }
+
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+Your appointment has been cancelled.
+
+📋 CANCELLED APPOINTMENT DETAILS:
+• Appointment ID: ${appointment.id}
+• Date: ${appointmentDate}
+• Time: ${startTime}
+• Doctor: Dr. ${appointment.doctor.name}
+${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.specialization}` : ''}
+• Previous Status: ${previousStatus.toUpperCase()}
+• Current Status: CANCELLED
+
+${refundInfo}
+
+📞 NEXT STEPS:
+• If you need to reschedule, please contact the hospital reception
+• For urgent medical needs, please visit the emergency department
+• You can book a new appointment through our system
+
+📱 Contact Information:
+${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Please contact hospital reception'}
+
+We apologize for any inconvenience caused and look forward to serving you in the future.`;
+  }
+
+  /**
+   * Generate professional appointment completion message
+   */
+  generateCompletionMessage(appointment) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : '';
+    
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+Thank you for visiting us today!
+
+📋 COMPLETED APPOINTMENT:
+• Appointment ID: ${appointment.id}
+• Date: ${appointmentDate}
+• Time: ${startTime}
+• Doctor: Dr. ${appointment.doctor.name}
+${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.specialization}` : ''}
+• Status: COMPLETED ✅
+
+🩺 POST-VISIT INFORMATION:
+• Please follow the prescribed treatment plan
+• Take medications as advised by the doctor
+• Schedule follow-up appointments if recommended
+• Keep your prescription and medical reports safe
+
+💡 FEEDBACK:
+We value your feedback! Your experience helps us improve our services.
+
+📱 FUTURE APPOINTMENTS:
+You can book your next appointment through our system or contact the reception.
+
+Thank you for choosing ${appointment.hospital.name} for your healthcare needs. We wish you good health!
+
+For any medical queries, please contact: ${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Hospital reception'}`;
+  }
+
+  /**
+   * Generate professional missed appointment message
+   */
+  generateMissedAppointmentMessage(appointment) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
+    
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+We notice you missed your scheduled appointment today.
+
+📋 MISSED APPOINTMENT DETAILS:
+• Appointment ID: ${appointment.id}
+• Date: ${appointmentDate}
+• Time: ${startTime}
+• Doctor: Dr. ${appointment.doctor.name}
+${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.specialization}` : ''}
+• Status: MISSED ❌
+
+📞 RESCHEDULE OPTIONS:
+• Contact our reception to book a new appointment
+• Visit our hospital for walk-in consultation (subject to availability)
+• Use our online booking system
+
+⚠️ IMPORTANT NOTES:
+• Regular medical check-ups are important for your health
+• If this was an emergency, please visit our emergency department
+• Missing appointments may affect treatment continuity
+
+📱 Contact Information:
+${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Please contact hospital reception'}
+
+We care about your health and look forward to serving you soon.`;
+  }
+
+  /**
+   * Generate professional rebooked appointment message
+   */
+  generateRebookedMessage(appointment, previousStatus) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
+    const endTime = appointment.endTime ? new Date(appointment.endTime).toISOString().split('T')[1].split('.')[0] : '';
+    
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+Great news! Your appointment has been rescheduled.
+
+📋 UPDATED APPOINTMENT DETAILS:
+• Appointment ID: ${appointment.id}
+• New Date: ${appointmentDate}
+• New Time: ${startTime}${endTime ? ` - ${endTime}` : ''}
+• Doctor: Dr. ${appointment.doctor.name}
+${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.specialization}` : ''}
+• Previous Status: ${previousStatus.toUpperCase()}
+• Current Status: BOOKED ✅
+
+👨‍⚕️ DOCTOR INFORMATION:
+${appointment.doctor.qualification ? `• Qualification: ${appointment.doctor.qualification}` : ''}
+${appointment.doctor.experience ? `• Experience: ${appointment.doctor.experience} years` : ''}
+
+💰 PAYMENT STATUS:
+${appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID ? '✅ Confirmed' : '⏳ Pending'}
+${appointment.amount ? `• Amount: ₹${appointment.amount}` : ''}
+
+📝 REMINDERS:
+• Please arrive 15 minutes before your appointment time
+• Bring all relevant medical documents
+• Carry a valid ID proof
+• Follow any pre-appointment instructions given by the doctor
+
+📱 Need to make changes? Contact our reception or use our online system.
+
+We look forward to providing you with excellent healthcare services!`;
+  }
+
+  /**
+   * Generate professional payment confirmation message
+   */
+  generatePaymentConfirmationMessage(appointment) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
+    
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+Payment confirmed! Thank you for your payment.
+
+💰 PAYMENT DETAILS:
+• Transaction Status: SUCCESS ✅
+• Amount Paid: ₹${appointment.amount || 'N/A'}
+• Payment Method: ${appointment.paymentMethod ? appointment.paymentMethod.toUpperCase() : 'N/A'}
+• Payment Date: ${appointment.paymentAt || 'Just now'}
+
+📋 APPOINTMENT DETAILS:
+• Appointment ID: ${appointment.id}
+• Date: ${appointmentDate}
+• Time: ${startTime}
+• Doctor: Dr. ${appointment.doctor.name}
+${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.specialization}` : ''}
+• Status: ${appointment.status.toUpperCase()}
+
+🎯 NEXT STEPS:
+• Your appointment is now confirmed
+• You will receive queue updates on the appointment day
+• Please arrive 15 minutes early
+• Bring this confirmation and a valid ID
+
+📱 IMPORTANT NOTES:
+• Keep this payment confirmation for your records
+• For any payment-related queries, contact our accounts department
+• Refunds (if applicable) will be processed within 5-7 business days
+
+Thank you for choosing ${appointment.hospital.name}. We look forward to serving you!
+
+Contact: ${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Hospital reception'}`;
+  }
+
+  /**
+   * Generate professional appointment deletion message
+   */
+  generateDeletionMessage(appointment) {
+    const appointmentDate = appointment.appointmentDate;
+    const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
+    
+    // Build refund information if payment was made
+    let refundInfo = '';
+    if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID && appointment.amount) {
+      refundInfo = `\n💰 REFUND INFORMATION:
+• Paid Amount: ₹${appointment.amount}
+• Refund Status: Processing
+• Expected Credit: 5-7 business days
+• Credit Method: Original payment source`;
+    }
+
+    return `🏥 ${appointment.hospital.name}
+
+Dear ${appointment.patientName},
+
+Your appointment has been permanently removed from our system.
+
+📋 DELETED APPOINTMENT DETAILS:
+• Appointment ID: ${appointment.id}
+• Date: ${appointmentDate}
+• Time: ${startTime}
+• Doctor: Dr. ${appointment.doctor.name}
+${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.specialization}` : ''}
+• Patient: ${appointment.patientName}
+• Mobile: ${appointment.mobile}
+• Deletion Date: ${new Date().toLocaleDateString()}
+
+${refundInfo}
+
+📞 REBOOKING OPTIONS:
+• Contact hospital reception: ${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Available at hospital'}
+• Visit our online booking system
+• Walk-in consultation (subject to availability)
+
+⚠️ IMPORTANT NOTES:
+• This appointment slot is now available for other patients
+• If you have urgent medical needs, please contact the emergency department
+• All appointment-related data has been securely removed from our active system
+
+📱 CUSTOMER SUPPORT:
+For any questions about this deletion or to book a new appointment, please contact our customer support team.
+
+We apologize for any inconvenience and hope to serve you again in the future.
+
+${appointment.hospital.name}
+Your Health, Our Priority`;
   }
   
 }
