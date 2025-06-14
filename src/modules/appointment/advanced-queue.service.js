@@ -320,7 +320,58 @@ class AdvancedQueueService {
       return cachedPosition;
     }
     
-    // If not in cache, calculate the position
+    // Handle completed appointments differently
+    if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
+      const result = {
+        position: 0,
+        appointmentsAhead: 0,
+        estimatedWaitTime: 0,
+        estimatedWaitTimeIST: 'Completed',
+        queueStatus: 'Your appointment has been completed',
+        isPatientTurn: false,
+        isCompleted: true
+      };
+      
+      // Cache the result for completed appointments
+      await redisService.set(positionCacheKey, result, this.CACHE_TTL.QUEUE_POSITION);
+      return result;
+    }
+    
+    // Handle cancelled appointments
+    if (appointment.status === APPOINTMENT_STATUS.CANCELLED) {
+      const result = {
+        position: 0,
+        appointmentsAhead: 0,
+        estimatedWaitTime: 0,
+        estimatedWaitTimeIST: 'Cancelled',
+        queueStatus: 'Your appointment has been cancelled',
+        isPatientTurn: false,
+        isCancelled: true
+      };
+      
+      // Cache the result for cancelled appointments
+      await redisService.set(positionCacheKey, result, this.CACHE_TTL.QUEUE_POSITION);
+      return result;
+    }
+    
+    // Handle missed appointments
+    if (appointment.status === APPOINTMENT_STATUS.MISSED) {
+      const result = {
+        position: 0,
+        appointmentsAhead: 0,
+        estimatedWaitTime: 0,
+        estimatedWaitTimeIST: 'Missed',
+        queueStatus: 'Your appointment was missed',
+        isPatientTurn: false,
+        isMissed: true
+      };
+      
+      // Cache the result for missed appointments
+      await redisService.set(positionCacheKey, result, this.CACHE_TTL.QUEUE_POSITION);
+      return result;
+    }
+    
+    // If not in cache, calculate the position for BOOKED appointments
     const startTime = new Date(appointment.startTime);
     const appointmentDateTime = new Date(appointment.appointmentDate);
     appointmentDateTime.setHours(startTime.getHours(), startTime.getMinutes(), 0, 0);
@@ -328,7 +379,7 @@ class AdvancedQueueService {
     // Get current time in IST
     const currentTimeIST = TimezoneUtil.getCurrentIst();
     
-    // Find all appointments with the same start time
+    // Find all appointments with the same start time (only BOOKED appointments for queue calculation)
     const sameTimeAppointments = await prisma.appointment.findMany({
       where: {
         hospitalId: appointment.hospitalId,
@@ -350,7 +401,20 @@ class AdvancedQueueService {
     // Find position in queue
     const appointmentIndex = sameTimeAppointments.findIndex(apt => apt.id === appointment.id);
     if (appointmentIndex === -1) {
-      throw new Error('Appointment not found in queue');
+      // If appointment is not found in BOOKED appointments, it might have a different status
+      const result = {
+        position: 0,
+        appointmentsAhead: 0,
+        estimatedWaitTime: 0,
+        estimatedWaitTimeIST: 'Not in queue',
+        queueStatus: `Appointment status: ${appointment.status.toUpperCase()}`,
+        isPatientTurn: false,
+        statusChanged: true
+      };
+      
+      // Cache the result
+      await redisService.set(positionCacheKey, result, this.CACHE_TTL.QUEUE_POSITION);
+      return result;
     }
 
     const position = appointmentIndex + 1;
