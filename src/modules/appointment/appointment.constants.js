@@ -42,7 +42,7 @@ const QUEUES = {
 
 // Tracking link configuration
 const TRACKING_LINK = {
-  TOKEN_EXPIRY: '3d', // JWT expiry for tracking links
+  TOKEN_EXPIRY: '2d', // JWT expiry for tracking links
   ALGORITHM: 'HS256' // JWT algorithm
 };
 
