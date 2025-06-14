@@ -103,7 +103,7 @@ class WhatsAppService {
     
     // Add + if not present
     if (!formatted.startsWith('+')) {
-      formatted = '+' + formatted;
+      formatted = '+91' + formatted;
     }
     
     // Add whatsapp: prefix
