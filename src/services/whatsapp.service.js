@@ -38,11 +38,7 @@ class WhatsAppService {
         messageData.mediaUrl = options.mediaUrl;
       }
 
-      console.log('Sending WhatsApp message: WatsappService()-----------------' , {
-        to: formattedNumber,
-        message: message,
-        options: options
-      });
+      console.log('Sending WhatsApp message: WatsappService()-----------------' ," ---------twilioPhoneNumber", this.twilioPhoneNumber, " ---------formattedNumber", formattedNumber, " ---------messageData", messageData);
 
       const response = await this.client.messages.create(messageData);
       
