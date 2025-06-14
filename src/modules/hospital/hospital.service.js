@@ -85,7 +85,7 @@ class HospitalService {
           // Queue welcome email
           await messageService.sendMessage('email',{
             to: userEmail,
-            subject: 'Welcome to Tempus',
+            subject: 'Welcome to Tiqora',
             hospitalId: hospital.id,
             metadata: {
               subscriptionId: subscription.id,
