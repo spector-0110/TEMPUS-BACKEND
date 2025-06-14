@@ -6,8 +6,8 @@ class DoctorValidator {
   validateCreateDoctorData(data) {
     const schema = z.object({
       name: z.string().min(2).max(100),
-      specialization: z.string().min(2).max(100),
-      qualification: z.string().min(2).max(100),
+      specialization: z.string().min(2).max(1000),
+      qualification: z.string().min(2).max(1000),
       experience: z.number().int().min(0),
       age: z.number().int().min(20).max(100),
       phone: z.string().regex(/^\+?[\d\s-]{8,}$/),
@@ -38,8 +38,8 @@ class DoctorValidator {
     // Create schemas for different types of updates
     const basicInfoSchema = z.object({
       name: z.string().min(2).max(100).optional(),
-      specialization: z.string().min(2).max(100).optional(),
-      qualification: z.string().min(2).max(100).optional(),
+      specialization: z.string().min(2).max(1000).optional(),
+      qualification: z.string().min(2).max(1000).optional(),
       experience: z.union([z.number().int().min(0), z.string().regex(/^\d+$/).transform(Number)]).optional(),
       age: z.union([z.number().int().min(20).max(100), z.string().regex(/^\d+$/).transform(Number)]).optional(),
     });
