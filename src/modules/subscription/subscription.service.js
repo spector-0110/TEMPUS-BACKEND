@@ -399,7 +399,7 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
           razorpayOrderId: razorpayOrder.id,
           doctorCount,
           billingCycle,
-          finalPriceWithCharges,
+          totalPrice:finalPriceWithCharges,
           paymentStatus: PAYMENT_STATUS.PENDING,
           startDate,
           endDate,
