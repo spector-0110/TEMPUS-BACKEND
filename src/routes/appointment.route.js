@@ -11,6 +11,7 @@ router.get('/details/:subdomain',verifySignature, appointmentController.getHospi
 router.post('/',verifySignature, appointmentController.createAppointment);
 router.delete('/:id', verifySignature,appointmentController.deleteAppointment);
 router.get('/public/:id', verifySignature, appointmentController.getAppointmentById);
+router.patch('/documents/:token', verifySignature, appointmentController.updateAppointmentDocuments);
 
 // Protected endpoints - require authentication
 router.get('/history', authMiddleware, appointmentController.getAppointmentHistory);

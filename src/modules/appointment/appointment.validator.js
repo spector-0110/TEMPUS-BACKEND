@@ -119,10 +119,28 @@ const trackingTokenSchema = Joi.object({
   })
 });
 
+// Schema for updating appointment documents
+const documentsUpdateSchema = Joi.object({
+  documents: Joi.array()
+    .items(
+      Joi.string().uri().messages({
+        'string.uri': 'Each document must be a valid URL'
+      })
+    )
+    .min(1)
+    .required()
+    .messages({
+      'array.base': 'Documents must be an array',
+      'array.min': 'At least one document URL is required',
+      'any.required': 'Documents array is required'
+    })
+});
+
 module.exports = {
   validateAppointment: (data) => appointmentSchema.validate(data, { abortEarly: false }),
   validateAppointmentStatus: (data) => appointmentStatusSchema.validate(data, { abortEarly: false }),
   validatePaymentStatus: (data) => paymentStatusSchema.validate(data, { abortEarly: false }),
   validateAppointmentId: (data) => appointmentIdSchema.validate(data, { abortEarly: false }),
-  validateTrackingToken: (data) => trackingTokenSchema.validate(data, { abortEarly: false })
+  validateTrackingToken: (data) => trackingTokenSchema.validate(data, { abortEarly: false }),
+  validateDocumentsUpdate: (data) => documentsUpdateSchema.validate(data, { abortEarly: false })
 };

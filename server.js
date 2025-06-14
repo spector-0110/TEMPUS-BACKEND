@@ -10,7 +10,7 @@ const hospitalRoutes = require('./src/routes/hospital.routes');
 // const patientRoutes = require('./src/routes/patient.routes');
 const doctorRoutes = require('./src/routes/doctor.routes');
 const appointmentRoutes = require('./src/routes/appointment.route');
-const appointmentProcessor = require('./src/queue/appointmentProcessor');
+const appointmentProcessor = require('./src/modules/appointment/appointmentProcessor');
 const websocketService = require('./src/services/websocket.service');
 
 const app = express();

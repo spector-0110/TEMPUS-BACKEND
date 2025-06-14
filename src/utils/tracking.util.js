@@ -37,6 +37,21 @@ class TrackingLinkUtil {
     return `${process.env.APPPINTMENT_FRONTEND_URL || 'http://localhost:3000'}/track/${token}`;
   }
 
+
+   /**
+   * Generate a complete tracking link for an appointment
+   * 
+   * @param {string} appointmentId - The appointment ID
+   * @param {string} hospitalId - The hospital ID
+   * @param {string} doctorId - The doctor ID
+   * @returns {string} Full tracking URL
+   */
+  generateUploadLink(appointmentId, hospitalId, doctorId) {
+    const token = this.generateToken(appointmentId, hospitalId, doctorId);
+    return `${process.env.APPPINTMENT_FRONTEND_URL || 'http://localhost:3000'}/upload/${token}`;
+  }
+
+
   /**
    * Verify and decode a tracking token
    * 

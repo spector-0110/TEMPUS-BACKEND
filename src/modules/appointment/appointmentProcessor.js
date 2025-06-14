@@ -1,9 +1,9 @@
-const rabbitmqService = require('../services/rabbitmq.service');
-const redisService = require('../services/redis.service');
-const messageService = require('../modules/notification/message.service');
-const TimezoneUtil = require('../utils/timezone.util');
-const { QUEUES, APPOINTMENT_STATUS,APPOINTMENT_PAYMENT_STATUS } = require('../modules/appointment/appointment.constants');
-const appointmentService = require('../modules/appointment/appointment.service');
+const rabbitmqService = require('../../services/rabbitmq.service');
+const redisService = require('../../services/redis.service');
+const messageService = require('../notification/message.service');
+const TimezoneUtil = require('../../utils/timezone.util');
+const { QUEUES, APPOINTMENT_STATUS,APPOINTMENT_PAYMENT_STATUS } = require('./appointment.constants');
+const appointmentService = require('./appointment.service');
 
 class AppointmentProcessor {
   constructor() {
@@ -356,7 +356,6 @@ Dear ${appointment.patientName},
 Your appointment has been successfully booked!
 
 📋 APPOINTMENT DETAILS:
-• Appointment ID: ${appointment.id}
 • Date: ${appointmentDate}
 • Time: ${startTime}${endTime ? ` - ${endTime}` : ''}
 • Patient Name: ${appointment.patientName}
@@ -408,7 +407,6 @@ Dear ${appointment.patientName},
 Your appointment has been cancelled.
 
 📋 CANCELLED APPOINTMENT DETAILS:
-• Appointment ID: ${appointment.id}
 • Date: ${appointmentDate}
 • Time: ${startTime}
 • Doctor: Dr. ${appointment.doctor.name}
@@ -436,6 +434,21 @@ We apologize for any inconvenience caused and look forward to serving you in the
     const appointmentDate = appointment.appointmentDate;
     const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : '';
     
+    // Build upload document link section if available
+    let uploadDocumentSection = '';
+    if (appointment.uploadDocumentLink) {
+      uploadDocumentSection = `\n📄 UPLOAD DOCUMENTS:
+${appointment.uploadDocumentLink}
+
+You can use this link to:
+• Upload your prescription
+• Share test reports with your doctor
+• Store medical documents securely
+• Access your health records anytime
+
+`;
+    }
+    
     return `🏥 ${appointment.hospital.name}
 
 Dear ${appointment.patientName},
@@ -443,7 +456,6 @@ Dear ${appointment.patientName},
 Thank you for visiting us today!
 
 📋 COMPLETED APPOINTMENT:
-• Appointment ID: ${appointment.id}
 • Date: ${appointmentDate}
 • Time: ${startTime}
 • Doctor: Dr. ${appointment.doctor.name}
@@ -456,7 +468,7 @@ ${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.
 • Schedule follow-up appointments if recommended
 • Keep your prescription and medical reports safe
 
-💡 FEEDBACK:
+${uploadDocumentSection}💡 FEEDBACK:
 We value your feedback! Your experience helps us improve our services.
 
 📱 FUTURE APPOINTMENTS:
@@ -481,7 +493,6 @@ Dear ${appointment.patientName},
 We notice you missed your scheduled appointment today.
 
 📋 MISSED APPOINTMENT DETAILS:
-• Appointment ID: ${appointment.id}
 • Date: ${appointmentDate}
 • Time: ${startTime}
 • Doctor: Dr. ${appointment.doctor.name}
@@ -519,7 +530,6 @@ Dear ${appointment.patientName},
 Great news! Your appointment has been rescheduled.
 
 📋 UPDATED APPOINTMENT DETAILS:
-• Appointment ID: ${appointment.id}
 • New Date: ${appointmentDate}
 • New Time: ${startTime}${endTime ? ` - ${endTime}` : ''}
 • Doctor: Dr. ${appointment.doctor.name}
@@ -566,7 +576,6 @@ Payment confirmed! Thank you for your payment.
 • Payment Date: ${appointment.paymentAt || 'Just now'}
 
 📋 APPOINTMENT DETAILS:
-• Appointment ID: ${appointment.id}
 • Date: ${appointmentDate}
 • Time: ${startTime}
 • Doctor: Dr. ${appointment.doctor.name}
@@ -613,7 +622,6 @@ Dear ${appointment.patientName},
 Your appointment has been permanently removed from our system.
 
 📋 DELETED APPOINTMENT DETAILS:
-• Appointment ID: ${appointment.id}
 • Date: ${appointmentDate}
 • Time: ${startTime}
 • Doctor: Dr. ${appointment.doctor.name}

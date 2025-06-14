@@ -1,5 +1,6 @@
 const appointmentService = require('./appointment.service');
 const validator = require('./appointment.validator');
+const trackingUtil = require('../../utils/tracking.util');
 
 /**
  * Controller for appointment-related API endpoints
@@ -458,6 +459,75 @@ class AppointmentController {
       return res.status(500).json({ 
         success: false, 
         message: 'Failed to retrieve appointment history', 
+        error: error.message 
+      });
+    }
+  }
+
+  /**
+   * Update appointment documents
+   */
+  async updateAppointmentDocuments(req, res) {
+    try {
+      // Extract JWT token from URL parameter
+      const { token } = req.params;
+      
+      if (!token) {
+        return res.status(400).json({
+          success: false,
+          message: 'JWT token is required'
+        });
+      }
+
+      // Verify the JWT token
+      let tokenData;
+      try {
+        tokenData = trackingUtil.verifyToken(token);
+      } catch (error) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired token',
+          error: error.message
+        });
+      }
+
+      // Extract appointment ID from verified token
+      const appointmentId = tokenData.appointmentId;
+
+      // Validate documents data
+      const { error, value } = validator.validateDocumentsUpdate(req.body);
+      if (error) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Invalid documents data',
+          errors: error.details.map(detail => detail.message)
+        });
+      }
+
+      // Update the appointment documents
+      const appointment = await appointmentService.updateAppointmentDocuments(
+        appointmentId, 
+        value.documents
+      );
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Appointment documents updated successfully',
+      });
+    } catch (error) {
+      console.error('Error in updateAppointmentDocuments controller:', error);
+      
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Appointment not found', 
+          error: error.message 
+        });
+      }
+      
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to update appointment documents', 
         error: error.message 
       });
     }

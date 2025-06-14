@@ -115,6 +115,13 @@ class AppointmentService {
         doctor: true
       }
     });
+
+    // Generate document link only when appointment is completed
+    if(status === APPOINTMENT_STATUS.COMPLETED) {
+      const uploadDocumentLink = trackingUtil.generateUploadLink(appointment.id, appointment.hospitalId, appointment.doctorId);
+      appointment.uploadDocumentLink = uploadDocumentLink;
+    }
+
     
     // Update cache
     await this.cacheAppointment(appointment);
@@ -125,7 +132,7 @@ class AppointmentService {
     // Publish to the appointment updated queue
     await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
       appointment,
-      previousStatus: currentAppointment.status 
+      previousStatus: currentAppointment.status,
     });
     
     return appointment;
@@ -166,6 +173,45 @@ class AppointmentService {
     return appointment;
   }
   
+   /**
+   * Update appointment documents
+   */
+  async updateAppointmentDocuments(appointmentId, documents) {
+    try {
+      // Get current appointment to verify it exists
+      const currentAppointment = await this.getAppointmentById(appointmentId);
+      
+      if (!currentAppointment) {
+        throw new Error('Appointment not found');
+      }
+
+      // Update the appointment with new documents
+      const appointment = await prisma.appointment.update({
+        where: { id: appointmentId },
+        data: { documents },
+        include: {
+          hospital: true,
+          doctor: true
+        }
+      });
+      
+      // Update cache
+      await this.cacheAppointment(appointment);
+      
+      // // Publish to the appointment updated queue
+      // await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
+      //   appointment,
+      //   updateType: 'documents',
+      //   previousDocuments: currentAppointment.documents 
+      // });
+      
+      return appointment;
+    } catch (error) {
+      console.error('Error updating appointment documents:', error);
+      throw error;
+    }
+  }
+
   /**
    * Get all appointments with optional filtering
    */

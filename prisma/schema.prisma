@@ -195,6 +195,7 @@ model Appointment {
   createdAt          DateTime           @default(now()) @map("created_at")
   paymentAt          DateTime?            @map("payment_at")
   amount             Int?
+  documents          Json?               @default("[]")
 
   // Relations
   hospital   Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
