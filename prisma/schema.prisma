@@ -118,6 +118,7 @@ model SubscriptionHistory {
   doctorCount    Int                @map("doctor_count")
   billingCycle   BillingCycle       @map("billing_cycle")
   totalPrice     Decimal            @map("total_price")
+  adjustedPrice     Decimal?         @map("adjusted_price")
   startDate      DateTime           @map("start_date")
   paymentStatus  SubscriptionPaymentStatus  @default(PENDING) @map("payment_status")
   endDate        DateTime           @map("end_date")

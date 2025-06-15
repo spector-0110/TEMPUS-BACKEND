@@ -270,6 +270,7 @@ async sendSubscriptionEmail(subscription, emailType, hospital) {
               doctorCount,
               billingCycle,
               totalPrice,
+              adjustedPrice: totalPrice, // Set adjustedPrice equal to totalPrice for new subscriptions
               startDate,
               endDate,
               paymentMethod,
@@ -377,7 +378,7 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
       }
 
       // Calculate pricing and dates
-      const { startDate, endDate, amountInPaise ,finalPriceWithCharges} = await this.calculateRenewalDetails(
+      const { startDate, endDate, amountInPaise ,finalPriceWithCharges,totalPrice} = await this.calculateRenewalDetails(
         doctorCount, 
         billingCycle,
         currentSub
@@ -399,7 +400,8 @@ async createRenewSubscription(hospitalId, billingCycle, updatedDoctorsCount = nu
           razorpayOrderId: razorpayOrder.id,
           doctorCount,
           billingCycle,
-          totalPrice:finalPriceWithCharges,
+          totalPrice:totalPrice,
+          adjustedPrice:finalPriceWithCharges,
           paymentStatus: PAYMENT_STATUS.PENDING,
           startDate,
           endDate,
@@ -548,8 +550,6 @@ async calculateRenewalDetails(doctorCount, billingCycle, currentSub) {
   const remaining = await this.calculateRemainingAmount(currentSub);
   const remainingPrice = remaining ? remaining.remainingAmount : 0;
   
-  // Store the original price before adjusting for remaining credit
-  let finalPrice = totalPrice;
   let priceBeforePlatformCharges = totalPrice;
   
   // Adjust final price by subtracting any remaining amount from the current subscription
@@ -569,7 +569,7 @@ async calculateRenewalDetails(doctorCount, billingCycle, currentSub) {
   const totalPlatformCharges = platformFee + gstOnPlatformFee;
 
   // Add platform charges to adjusted price
-  const finalPriceWithCharges = Math.max(1, priceBeforePlatformCharges + totalPlatformCharges);
+  const finalPriceWithCharges = Math.round(Math.max(1, priceBeforePlatformCharges + totalPlatformCharges));
 
   // Convert to paise (Indian currency smallest unit) for Razorpay
   // Ensure minimum amount is 100 paise (₹1) as Razorpay doesn't accept 0
@@ -1095,6 +1095,7 @@ async _findSubscriptionData(tx, hospitalId, razorpayOrderId) {
     select: {
       id: true,
       totalPrice: true,
+      adjustedPrice:true,
       doctorCount: true,
       billingCycle: true,
       startDate: true,
@@ -1117,7 +1118,7 @@ async _findSubscriptionData(tx, hospitalId, razorpayOrderId) {
 
 _verifyPaymentAmount(paymentDetails, subscriptionHistory, context) {
   // Convert to strings and compare to avoid floating point precision issues
-  const expectedAmountInPaise = (subscriptionHistory.totalPrice * 100).toFixed(0);
+  const expectedAmountInPaise = (subscriptionHistory.adjustedPrice * 100).toFixed(0);
   const receivedAmount = paymentDetails.amount.toFixed(0);
   
   if (receivedAmount !== expectedAmountInPaise) {
@@ -1125,7 +1126,7 @@ _verifyPaymentAmount(paymentDetails, subscriptionHistory, context) {
       ...context,
       expectedAmount: expectedAmountInPaise,
       receivedAmount,
-      expectedAmountINR: subscriptionHistory.totalPrice,
+      expectedAmountINR: subscriptionHistory.adjustedPrice,
       receivedAmountINR: receivedAmount / 100,
       timestamp: new Date().toISOString()
     });
@@ -1137,13 +1138,13 @@ _verifyPaymentAmount(paymentDetails, subscriptionHistory, context) {
       difference: Math.abs(receivedAmount - expectedAmountInPaise)
     });
     
-    throw new Error(`Payment amount mismatch: expected ₹${subscriptionHistory.totalPrice}, received ₹${receivedAmount / 100}`);
+    throw new Error(`Payment amount mismatch: expected ₹${subscriptionHistory.adjustedPrice}, received ₹${receivedAmount / 100}`);
   }
   
   console.debug('Payment amount verification passed', {
     ...context,
     amount: expectedAmountInPaise,
-    amountINR: subscriptionHistory.totalPrice,
+    amountINR: subscriptionHistory.adjustedPrice,
     timestamp: new Date().toISOString()
   });
 }
@@ -1191,6 +1192,7 @@ async _updateSubscriptionRecords(tx, currentSub,hospitalId, subscriptionHistory,
     historyId: subscriptionHistory.id,
     doctorCount: updatedSubscription.doctorCount,
     totalPrice: updatedSubscription.totalPrice,
+    adjustedPrice:subscriptionHistory.adjustedPrice,
     endDate: updatedSubscription.endDate,
     timestamp: new Date().toISOString()
   });
