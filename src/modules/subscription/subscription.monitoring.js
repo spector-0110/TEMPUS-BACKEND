@@ -140,7 +140,7 @@ class SubscriptionMonitoringService {
                 const result = await prisma.$transaction(async (tx) => {
                   try {
                     // Find current subscription
-                    const currentSub = await tx.subscription.findFirst({
+                    const currentSub = await tx.subscription.find({
                       where: { hospitalId: renewal.hospitalId },
                       orderBy: { createdAt: 'desc' }
                     });
