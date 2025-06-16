@@ -104,6 +104,8 @@ class SubscriptionMonitoringService {
       if (renewal.razorpayOrderId) {
         const getRazorpayInstance = require('../../config/razorpay.config');
         const razorpay = getRazorpayInstance();
+        const subscriptionService = require('./subscription.service');
+        const mailService = require('../../services/mail.service');
         
         try {
           const orderDetails = await razorpay.orders.fetch(renewal.razorpayOrderId);
@@ -118,20 +120,125 @@ class SubscriptionMonitoringService {
           });
           
           if (orderDetails.status === 'paid') {
-            console.warn('Found paid order that was not processed - requires manual verification', {
-              renewalId: renewal.id,
-              razorpayOrderId: renewal.razorpayOrderId,
-              hospitalId: renewal.hospitalId,
-              hospitalName: renewal.hospital?.name,
-              adminEmail: renewal.hospital?.adminEmail
-            });
+            // Fetch complete payment details using order_id
+            const payments = await razorpay.orders.fetchPayments(renewal.razorpayOrderId);
             
-            // This needs manual verification - mark for admin review
-            await this.markForAdminReview(renewal, 'PAID_BUT_NOT_PROCESSED', {
-              razorpayStatus: orderDetails.status,
-              razorpayAmount: orderDetails.amount,
-              razorpayAmountPaid: orderDetails.amount_paid
-            });
+            if (payments && payments.items && payments.items.length > 0) {
+              // Get the successful payment
+              const payment = payments.items.find(item => item.status === 'captured');
+              
+              if (payment) {
+                console.info(`Found successful payment for order ${renewal.razorpayOrderId}`, {
+                  paymentId: payment.id,
+                  paymentStatus: payment.status,
+                  paymentAmount: payment.amount,
+                  paymentMethod: payment.method,
+                  timestamp: new Date().toISOString()
+                });
+                
+                // Begin transaction to update subscription records
+                const result = await prisma.$transaction(async (tx) => {
+                  try {
+                    // Find current subscription
+                    const currentSub = await tx.subscription.findFirst({
+                      where: { hospitalId: renewal.hospitalId },
+                      orderBy: { createdAt: 'desc' }
+                    });
+                    
+                    if (!currentSub) {
+                      throw new Error(`No subscription found for hospital ${renewal.hospitalId}`);
+                    }
+                    
+                    // Update subscription records using subscription service methods
+                    const updatedSubscription = await subscriptionService._updateSubscriptionRecords(
+                      tx,
+                      currentSub,
+                      renewal.hospitalId,
+                      renewal,
+                      payment
+                    );
+                    
+                    // Perform post-processing (cache invalidation, notifications)
+                    await subscriptionService._performPostProcessing(
+                      updatedSubscription,
+                      renewal.hospital,
+                      renewal.hospitalId
+                    );
+                    
+                    return { success: true, subscription: updatedSubscription };
+                  } catch (txError) {
+                    console.error('Transaction failed during payment processing', {
+                      error: txError.message,
+                      stack: txError.stack,
+                      renewalId: renewal.id,
+                      hospitalId: renewal.hospitalId
+                    });
+                    throw txError;
+                  }
+                });
+                
+                // Notify superadmin about the successfully processed payment
+                const superadminEmail = process.env.SUPERADMIN_EMAIL;
+                if (superadminEmail) {
+                  const emailContent = `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                      <h2>Automatic Payment Recovery Success</h2>
+                      <p>A previously stuck payment has been successfully processed:</p>
+                      
+                      <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+                        <p><strong>Details:</strong></p>
+                        <ul>
+                          <li>Hospital: ${renewal.hospital?.name} (ID: ${renewal.hospitalId})</li>
+                          <li>Renewal ID: ${renewal.id}</li>
+                          <li>Razorpay Order ID: ${renewal.razorpayOrderId}</li>
+                          <li>Razorpay Payment ID: ${payment.id}</li>
+                          <li>Amount: Rs. ${payment.amount / 100}</li>
+                          <li>Payment Method: ${payment.method}</li>
+                          <li>Processed At: ${new Date().toISOString()}</li>
+                        </ul>
+                      </div>
+                      
+                      <p>The subscription has been automatically updated and the hospital has been notified.</p>
+                    </div>
+                  `;
+                  
+                  await mailService.sendMail(
+                    superadminEmail,
+                    `Payment Recovery Success - Hospital: ${renewal.hospital?.name}`,
+                    emailContent
+                  );
+                }
+                
+                console.info(`Successfully processed payment for renewal ${renewal.id}`, {
+                  renewalId: renewal.id,
+                  hospitalId: renewal.hospitalId,
+                  razorpayOrderId: renewal.razorpayOrderId,
+                  razorpayPaymentId: payment.id,
+                  timestamp: new Date().toISOString()
+                });
+                
+                return true;
+              } else {
+                // Payment exists for the order but none are captured/successful
+                await this.markForAdminReview(renewal, 'PAYMENT_ATTEMPTED_NOT_CAPTURED', {
+                  razorpayStatus: orderDetails.status,
+                  paymentsFound: payments.count
+                });
+              }
+            } else {
+              console.warn('Found paid order but no payment details - requires manual verification', {
+                renewalId: renewal.id,
+                razorpayOrderId: renewal.razorpayOrderId,
+                hospitalId: renewal.hospitalId
+              });
+              
+              // This needs manual verification - mark for admin review
+              await this.markForAdminReview(renewal, 'PAID_BUT_NO_PAYMENT_DETAILS', {
+                razorpayStatus: orderDetails.status,
+                razorpayAmount: orderDetails.amount,
+                razorpayAmountPaid: orderDetails.amount_paid
+              });
+            }
           } else if (orderDetails.status === 'created' || orderDetails.status === 'attempted') {
             // Order was created but never paid, safe to mark as failed
             await this.markRenewalAsFailed(renewal, 'TIMEOUT_UNPAID', {
@@ -149,23 +256,13 @@ class SubscriptionMonitoringService {
             renewalId: renewal.id,
             razorpayOrderId: renewal.razorpayOrderId,
             error: razorpayError.message,
-            errorCode: razorpayError.error?.code,
-            statusCode: razorpayError.statusCode
+            stack: razorpayError.stack
           });
           
-          // If it's a 404 or similar, the order might not exist
-          if (razorpayError.statusCode === 404) {
-            await this.markRenewalAsFailed(renewal, 'RAZORPAY_ORDER_NOT_FOUND', {
-              error: razorpayError.message
-            });
-          } else {
-            // Mark for manual review if we can't verify due to API issues
-            await this.markForAdminReview(renewal, 'RAZORPAY_API_ERROR', {
-              error: razorpayError.message,
-              errorCode: razorpayError.error?.code,
-              statusCode: razorpayError.statusCode
-            });
-          }
+          // Mark for admin review since we couldn't determine status
+          await this.markForAdminReview(renewal, 'RAZORPAY_API_ERROR', {
+            error: razorpayError.message
+          });
         }
       } else {
         // No Razorpay order ID, safe to mark as failed

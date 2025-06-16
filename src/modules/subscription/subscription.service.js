@@ -1168,9 +1168,9 @@ async _updateSubscriptionRecords(tx, currentSub,hospitalId, subscriptionHistory,
   });
 
   // Determine start date logic
-  const startDate = currentSub.status !== SUBSCRIPTION_STATUS.ACTIVE 
-    ? new Date(subscriptionHistory.startDate)
-    : new Date(currentSub.startDate);
+  // const startDate = currentSub.status !== SUBSCRIPTION_STATUS.ACTIVE 
+  //   ? new Date(subscriptionHistory.startDate)
+  //   : new Date(currentSub.startDate);
 
   // Update main subscription
   const updatedSubscription = await tx.hospitalSubscription.update({
