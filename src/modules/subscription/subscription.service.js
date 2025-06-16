@@ -1181,7 +1181,7 @@ async _updateSubscriptionRecords(tx, currentSub,hospitalId, subscriptionHistory,
       billingCycle: subscriptionHistory.billingCycle,
       paymentStatus: PAYMENT_STATUS.SUCCESS,
       totalPrice: subscriptionHistory.totalPrice,
-      startDate:new Date(subscriptionHistory.endDate),
+      startDate: new Date(subscriptionHistory.startDate),
       endDate: new Date(subscriptionHistory.endDate),
       updatedAt: new Date()
     },

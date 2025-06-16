@@ -7,7 +7,6 @@ class WhatsAppService {
     this.accountSid = twilioConfig.accountSid;
     this.authToken = twilioConfig.authToken;
     this.twilioPhoneNumber = twilioConfig.whatsapp.phoneNumber;
-    console.log("-------------", twilioConfig.whatsapp.phoneNumber, "--------", this.accountSid, "-------",this.authToken);
     // Initialize Twilio client
     this.client = twilio(this.accountSid, this.authToken);
   }
@@ -37,9 +36,6 @@ class WhatsAppService {
       if (options.mediaUrl) {
         messageData.mediaUrl = options.mediaUrl;
       }
-
-      console.log('Sending WhatsApp message: WatsappService()-----------------' ," ---------twilioPhoneNumber", this.twilioPhoneNumber, " ---------formattedNumber", formattedNumber, " ---------messageData", messageData);
-
       const response = await this.client.messages.create(messageData);
       
       // Log successful message

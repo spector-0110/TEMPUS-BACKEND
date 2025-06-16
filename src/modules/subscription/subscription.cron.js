@@ -26,8 +26,8 @@ class SubscriptionCronService {
       this.sendExpiryWarnings();
     });
 
-    // Run monitoring tasks every 10 minutes for faster cleanup of stuck renewals
-    this.monitoringJob = cron.schedule('*/10 * * * *', async () => {
+    // Run monitoring tasks every 5 minutes for faster cleanup of stuck renewals
+    this.monitoringJob = cron.schedule('*/05 * * * *', async () => {
       try {
         console.info('Running subscription monitoring tasks...');
         const startTime = Date.now();

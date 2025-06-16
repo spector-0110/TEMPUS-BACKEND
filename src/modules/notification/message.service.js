@@ -63,7 +63,7 @@ class MessageService {
     // Email queue consumer
     await setupConsumer(this.queues.email, async (message) => {
       const { to, subject, content, hospitalId } = message;
-      console.log('Processing email:', message);
+      // console.log('Processing email:', message);
       await mailService.sendMail(to, subject, content, hospitalId);
     }, { maxRetries: 3, prefetch: 10 });
   
@@ -85,7 +85,7 @@ class MessageService {
     // WhatsApp queue consumer
     await setupConsumer(this.queues.whatsapp, async (message) => {
       // WhatsApp implementation
-      console.log('Processing WhatsApp:', message);
+      // console.log('Processing WhatsApp:', message);
       watsappService.sendMessage(message.to, message.content);
 
       

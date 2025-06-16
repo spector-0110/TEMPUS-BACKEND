@@ -120,65 +120,15 @@ class SubscriptionMonitoringService {
           });
           
           if (orderDetails.status === 'paid') {
-            // Fetch complete payment details using order_id
-            const payments = await razorpay.orders.fetchPayments(renewal.razorpayOrderId);
-            
-            if (payments && payments.items && payments.items.length > 0) {
-              // Get the successful payment
-              const payment = payments.items.find(item => item.status === 'captured');
-              
-              if (payment) {
-                console.info(`Found successful payment for order ${renewal.razorpayOrderId}`, {
-                  paymentId: payment.id,
-                  paymentStatus: payment.status,
-                  paymentAmount: payment.amount,
-                  paymentMethod: payment.method,
-                  timestamp: new Date().toISOString()
-                });
-                
-                // Begin transaction to update subscription records
-                const result = await prisma.$transaction(async (tx) => {
-                  try {
-                    // Find current subscription
-                    const currentSub = await tx.subscription.find({
-                      where: { hospitalId: renewal.hospitalId },
-                      orderBy: { createdAt: 'desc' }
-                    });
-                    
-                    if (!currentSub) {
-                      throw new Error(`No subscription found for hospital ${renewal.hospitalId}`);
-                    }
-                    
-                    // Update subscription records using subscription service methods
-                    const updatedSubscription = await subscriptionService._updateSubscriptionRecords(
-                      tx,
-                      currentSub,
-                      renewal.hospitalId,
-                      renewal,
-                      payment
-                    );
-                    
-                    // Perform post-processing (cache invalidation, notifications)
-                    await subscriptionService._performPostProcessing(
-                      updatedSubscription,
-                      renewal.hospital,
-                      renewal.hospitalId
-                    );
-                    
-                    return { success: true, subscription: updatedSubscription };
-                  } catch (txError) {
-                    console.error('Transaction failed during payment processing', {
-                      error: txError.message,
-                      stack: txError.stack,
-                      renewalId: renewal.id,
-                      hospitalId: renewal.hospitalId
-                    });
-                    throw txError;
-                  }
-                });
-                
-                // Notify superadmin about the successfully processed payment
-                const superadminEmail = process.env.SUPER_ADMIN_EMAIL;
+
+            const result = await this.checkAndProcessRazorpayPayment(renewal.razorpayOrderId);
+            console.info(`Payment check result for renewal ${renewal.id}:`, {
+              renewalId: renewal.id,
+              razorpayOrderId: renewal.razorpayOrderId,
+              success: result.success,
+              timestamp: new Date().toISOString()
+            });
+            const superadminEmail = process.env.SUPER_ADMIN_EMAIL;
                 if (superadminEmail) {
                   const emailContent = `
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -209,36 +159,6 @@ class SubscriptionMonitoringService {
                   );
                 }
                 
-                console.info(`Successfully processed payment for renewal ${renewal.id}`, {
-                  renewalId: renewal.id,
-                  hospitalId: renewal.hospitalId,
-                  razorpayOrderId: renewal.razorpayOrderId,
-                  razorpayPaymentId: payment.id,
-                  timestamp: new Date().toISOString()
-                });
-                
-                return true;
-              } else {
-                // Payment exists for the order but none are captured/successful
-                await this.markForAdminReview(renewal, 'PAYMENT_ATTEMPTED_NOT_CAPTURED', {
-                  razorpayStatus: orderDetails.status,
-                  paymentsFound: payments.count
-                });
-              }
-            } else {
-              console.warn('Found paid order but no payment details - requires manual verification', {
-                renewalId: renewal.id,
-                razorpayOrderId: renewal.razorpayOrderId,
-                hospitalId: renewal.hospitalId
-              });
-              
-              // This needs manual verification - mark for admin review
-              await this.markForAdminReview(renewal, 'PAID_BUT_NO_PAYMENT_DETAILS', {
-                razorpayStatus: orderDetails.status,
-                razorpayAmount: orderDetails.amount,
-                razorpayAmountPaid: orderDetails.amount_paid
-              });
-            }
           } else if (orderDetails.status === 'created' || orderDetails.status === 'attempted') {
             // Order was created but never paid, safe to mark as failed
             await this.markRenewalAsFailed(renewal, 'TIMEOUT_UNPAID', {
@@ -574,6 +494,174 @@ class SubscriptionMonitoringService {
     });
 
     return results;
+  }
+
+  async checkAndProcessRazorpayPayment(orderId) {
+    if (!orderId) {
+      console.error('Cannot check Razorpay payment: No order ID provided');
+      return { success: false, error: 'No order ID provided' };
+    }
+
+    try {
+      console.info(`Checking Razorpay payment status for order ID: ${orderId}`, {
+        orderId,
+        timestamp: new Date().toISOString()
+      });
+
+      // Find related subscription history entry
+      const subscriptionHistory = await prisma.subscriptionHistory.findFirst({
+        where: { razorpayOrderId: orderId },
+        include: {
+          hospital: {
+            select: {
+              id: true,
+              name: true,
+              adminEmail: true
+            }
+          }
+        }
+      });
+
+      if (!subscriptionHistory) {
+        console.warn(`No subscription history found for order ID: ${orderId}`, {
+          orderId,
+          timestamp: new Date().toISOString()
+        });
+        return { success: false, error: 'No subscription history found for this order ID' };
+      }
+
+      // Get Razorpay instance
+      const getRazorpayInstance = require('../../config/razorpay.config');
+      const razorpay = getRazorpayInstance();
+      const subscriptionService = require('./subscription.service');
+      const mailService = require('../../services/mail.service');
+
+      // Fetch order details from Razorpay
+      const orderDetails = await razorpay.orders.fetch(orderId);
+
+      console.info(`Retrieved Razorpay order details:`, {
+        orderId,
+        orderStatus: orderDetails.status,
+        orderAmount: orderDetails.amount,
+        amountPaid: orderDetails.amount_paid,
+        timestamp: new Date().toISOString()
+      });
+
+      // Check if payment was successful
+      if (orderDetails.status === 'paid') {
+        // Fetch complete payment details
+        const payments = await razorpay.orders.fetchPayments(orderId);
+        
+        if (payments && payments.items && payments.items.length > 0) {
+          // Get the successful payment
+          const payment = payments.items.find(item => item.status === 'captured');
+          
+          if (payment) {
+            console.info(`Found successful payment for order ${orderId}`, {
+              paymentId: payment.id,
+              paymentStatus: payment.status,
+              paymentAmount: payment.amount,
+              paymentMethod: payment.method,
+              timestamp: new Date().toISOString()
+            });
+            
+            // Begin transaction to update subscription records
+            const result = await prisma.$transaction(async (tx) => {
+              // Find current subscription - note the correction to use hospitalSubscription
+              const currentSub = await tx.hospitalSubscription.findFirst({
+                where: { hospitalId: subscriptionHistory.hospitalId },
+                orderBy: { createdAt: 'desc' }
+              });
+              
+              if (!currentSub) {
+                throw new Error(`No subscription found for hospital ${subscriptionHistory.hospitalId}`);
+              }
+              
+              // Update subscription records using subscription service methods
+              const updatedSubscription = await subscriptionService._updateSubscriptionRecords(
+                tx,
+                currentSub,
+                subscriptionHistory.hospitalId,
+                subscriptionHistory,
+                payment
+              );
+              
+              return { success: true, subscription: updatedSubscription };
+            });
+            
+            // Perform post-processing (cache invalidation, notifications) outside transaction
+            await subscriptionService._performPostProcessing(
+              result.subscription,
+              subscriptionHistory.hospital,
+              subscriptionHistory.hospitalId
+            );
+            
+            // Notify superadmin about the successfully processed payment
+            const superadminEmail = process.env.SUPERADMIN_EMAIL;
+            if (superadminEmail) {
+              const emailContent = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2>Payment Successfully Processed</h2>
+                  <p>A payment has been successfully processed:</p>
+                  
+                  <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
+                    <p><strong>Details:</strong></p>
+                    <ul>
+                      <li>Hospital: ${subscriptionHistory.hospital?.name} (ID: ${subscriptionHistory.hospitalId})</li>
+                      <li>Subscription History ID: ${subscriptionHistory.id}</li>
+                      <li>Razorpay Order ID: ${orderId}</li>
+                      <li>Razorpay Payment ID: ${payment.id}</li>
+                      <li>Amount: Rs. ${payment.amount / 100}</li>
+                      <li>Payment Method: ${payment.method}</li>
+                      <li>Processed At: ${new Date().toISOString()}</li>
+                    </ul>
+                  </div>
+                  
+                  <p>The subscription has been automatically updated.</p>
+                </div>
+              `;
+              
+              await mailService.sendMail(
+                superadminEmail,
+                `Payment Success - Hospital: ${subscriptionHistory.hospital?.name}`,
+                emailContent
+              );
+            }
+            
+            console.info(`Successfully processed payment for order ${orderId}`, {
+              orderId,
+              hospitalId: subscriptionHistory.hospitalId,
+              subscriptionHistoryId: subscriptionHistory.id, 
+              razorpayPaymentId: payment.id,
+              timestamp: new Date().toISOString()
+            });
+            
+            return { 
+              success: true, 
+              paymentId: payment.id,
+              hospitalId: subscriptionHistory.hospitalId,
+              subscriptionId: result.subscription.id
+            };
+          } else {
+            console.warn(`No captured payment found for paid order ${orderId}`);
+            return { success: false, error: 'No captured payment found for this order' };
+          }
+        } else {
+          console.warn(`No payment details found for order ${orderId}`);
+          return { success: false, error: 'No payment details found for this order' };
+        }
+      } else {
+        console.info(`Order ${orderId} payment status is not 'paid' (status: ${orderDetails.status})`);
+        return { success: false, status: orderDetails.status };
+      }
+    } catch (error) {
+      console.error(`Failed to process payment for order ID: ${orderId}`, {
+        orderId,
+        error: error.message,
+        stack: error.stack
+      });
+      return { success: false, error: error.message };
+    }
   }
 }
 
