@@ -178,7 +178,7 @@ class SubscriptionMonitoringService {
                 });
                 
                 // Notify superadmin about the successfully processed payment
-                const superadminEmail = process.env.SUPERADMIN_EMAIL;
+                const superadminEmail = process.env.SUPER_ADMIN_EMAIL;
                 if (superadminEmail) {
                   const emailContent = `
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
