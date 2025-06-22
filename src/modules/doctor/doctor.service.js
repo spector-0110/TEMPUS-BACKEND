@@ -2,7 +2,6 @@ const { prisma } = require('../../services/database.service');
 const redisService = require('../../services/redis.service');
 const messageService = require('../notification/message.service');
 const doctorValidator = require('./doctor.validator');
-const subscriptionService = require('../subscription/subscription.service');
 const { CACHE_KEYS, CACHE_EXPIRY, DEFAULT_SCHEDULE, SCHEDULE_STATUS, DOCTOR_STATUS } = require('./doctor.constants');
 
 class DoctorService {
@@ -108,19 +107,6 @@ class DoctorService {
 
       if(updateData.status===DOCTOR_STATUS.INACTIVE && existingDoctor.status===DOCTOR_STATUS.INACTIVE){
         throw new Error('Doctor Status is INACTIVE');
-      }
-
-      if(updateData.status===DOCTOR_STATUS.ACTIVE && existingDoctor.status===DOCTOR_STATUS.INACTIVE){
-        // Check if hospital has an active subscription
-        const subscription = await subscriptionService.getHospitalSubscription(hospitalId, false);
-        if (!subscription) {
-          throw new Error('No active subscription found');
-        }
-        // Get current active doctor count for the hospital
-        const currentDoctors = await this.listDoctors(hospitalId);
-        if (currentDoctors.length >= subscription.doctorCount) {
-          throw new Error('Update the subscription to make the Doctor Status Active');
-        }
       }
 
       // If this is a contact info update, check for duplicates

@@ -4,8 +4,6 @@ const cors = require('cors');
 const redisService = require('./src/services/redis.service');
 const rabbitmqService = require('./src/services/rabbitmq.service');
 const { testConnection, disconnect } = require('./src/services/database.service');
-const subscriptionCronService = require('./src/modules/subscription/subscription.cron');
-const subscriptionRoutes = require('./src/routes/subscription.routes');
 const hospitalRoutes = require('./src/routes/hospital.routes');
 // const patientRoutes = require('./src/routes/patient.routes');
 const doctorRoutes = require('./src/routes/doctor.routes');
@@ -86,7 +84,6 @@ app.get('/health', async (req, res) => {
 
 // Routes
 app.use('/api/hospitals', hospitalRoutes);
-app.use('/api/subscriptions', subscriptionRoutes);
 // app.use('/api/patients', patientRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/appointments', appointmentRoutes);
@@ -166,7 +163,6 @@ async function shutdown(signal) {
     redis: false,
     rabbitmq: false,
     database: false,
-    cron: false,
     websocket: false
   };
 
@@ -185,12 +181,6 @@ async function shutdown(signal) {
       shutdownStatus.http = true;
       console.log('HTTP server closed');
     }
-
-    // Stop cron jobs
-    console.log('Stopping cron jobs...');
-    subscriptionCronService.stopCronJobs();
-    shutdownStatus.cron = true;
-    console.log('Cron jobs stopped');
 
     // Stop WebSocket service
     console.log('Stopping WebSocket service...');
@@ -252,14 +242,11 @@ let server;
 async function startServer() {
   try {
     await initializeServices();
-    //start cron jobs
-    subscriptionCronService.startCronJobs();
     // Initialize appointment processor
     await appointmentProcessor.initialize();
     
     server = app.listen(PORT, async () => {
       console.log(`Server running on http://localhost:${PORT}`);
-      console.log('✅ Subscription cron jobs started');
       console.log('✅ Appointment processor initialized');
       
       // Initialize WebSocket service

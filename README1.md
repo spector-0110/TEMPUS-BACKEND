@@ -34,10 +34,6 @@ Request → Auth Middleware → Hospital Controller → Service Layer → Databa
    - Implements rate limiting for OTP requests
    - Validates edit permissions
 
-### Subscription Management Flow
-```
-Request → Auth → Super Admin Check → Subscription Controller → Cache/DB → Response
-```
 
 ## 🔧 Critical Code Sections Explained
 
@@ -126,7 +122,6 @@ model Hospital {
   // Relationships
   doctors: Doctor[]
   appointments: Appointment[]
-  subscriptions: HospitalSubscription[]
 }
 ```
 
@@ -149,10 +144,9 @@ model Doctor {
 ### 1. Caching Strategy
 ```javascript
 // Types of Caching:
-1. Subscription Plans (24h TTL)
-2. Hospital Details (Variable TTL)
-3. OTP Storage (5m TTL)
-4. Rate Limit Data (1h TTL)
+1. Hospital Details (Variable TTL)
+2. OTP Storage (5m TTL)
+3. Rate Limit Data (1h TTL)
 ```
 
 ### 2. Database Optimizations

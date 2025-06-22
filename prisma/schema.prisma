@@ -16,12 +16,6 @@ enum AppointmentStatus {
   missed
 }
 
-enum SubscriptionPaymentStatus {
-  SUCCESS
-  PENDING
-  FAILED
-}
-
 enum NotificationStatus {
   sent
   not_sent
@@ -30,13 +24,6 @@ enum NotificationStatus {
 enum ScheduleStatus {
   active
   inactive
-}
-
-enum SubscriptionStatus {
-  ACTIVE
-  EXPIRED
-  CANCELLED
-  PENDING
 }
 
 enum BillingCycle {
@@ -78,62 +65,10 @@ model Hospital {
   //Relation::
   doctors             Doctor[]
   appointments        Appointment[]
-  subscriptions       HospitalSubscription[]
-  subscriptionHistory SubscriptionHistory[]
   doctorSchedules     DoctorSchedule[]
   usageStats          UsageStats[]  
   
   @@map("hospitals")
-}
-
-model HospitalSubscription {
-  id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  hospitalId     String             @map("hospital_id") @db.Uuid
-  doctorCount    Int                @default(0) @map("doctor_count")
-  billingCycle   BillingCycle       @map("billing_cycle")
-  startDate      DateTime           @map("start_date")
-  endDate        DateTime           @map("end_date")
-  totalPrice Decimal                @map("total_price")
-  lastNotifiedAt DateTime?          @map("last_notified_at")
-  autoRenew      Boolean            @default(false) @map("auto_renew")
-  status         SubscriptionStatus @default(PENDING)
-  paymentStatus  SubscriptionPaymentStatus  @default(PENDING) @map("payment_status")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
-
-  // Relations
-  hospital Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-  history  SubscriptionHistory[]
-
-  @@index([hospitalId], name: "idx_hospital_subscriptions_hospital_id")
-  @@index([status], name: "idx_hospital_subscriptions_status")
-  @@map("hospital_subscriptions")
-}
-
-model SubscriptionHistory {
-  id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  subscriptionId String             @map("subscription_id") @db.Uuid
-  hospitalId     String             @map("hospital_id") @db.Uuid
-  razorpayOrderId String?           
-  doctorCount    Int                @map("doctor_count")
-  billingCycle   BillingCycle       @map("billing_cycle")
-  totalPrice     Decimal            @map("total_price")
-  adjustedPrice     Decimal?         @map("adjusted_price")
-  startDate      DateTime           @map("start_date")
-  paymentStatus  SubscriptionPaymentStatus  @default(PENDING) @map("payment_status")
-  endDate        DateTime           @map("end_date")
-  paymentMethod  String?            @map("payment_method")
-  paymentDetails Json?              @map("payment_details")
-  createdBy      String?            @map("created_by") @db.Uuid
-  createdAt      DateTime           @default(now()) @map("created_at")
-
-  // Relations
-  subscription HospitalSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  hospital     Hospital             @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-
-  @@index([subscriptionId], name: "idx_hospital_subscription_history_subscription_id")
-  @@index([hospitalId], name: "idx_hospital_subscription_history_hospital_id")
-  @@map("hospital_subscription_history")
 }
 
 model Doctor {

@@ -31,20 +31,6 @@ class DoctorController {
     } catch (error) {
       console.error('Error creating doctor:', error);
 
-      if (error.message === 'No active subscription found') {
-        return res.status(402).json({ 
-          error: error.message,
-          message: 'Please activate a subscription to add doctors' 
-        });
-      }
-
-      if (error.message === 'Doctor limit reached for current subscription plan') {
-        return res.status(403).json({ 
-          error: error.message,
-          message: 'Please upgrade your subscription to add more doctors' 
-        });
-      }
-
       if (error.message === 'A doctor with this email or phone number or aadhar already exists in this hospital') {
         return res.status(409).json({ error: error.message });
       }

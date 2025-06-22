@@ -1,6 +1,6 @@
 # Tempus Backend API
 
-A robust Node.js backend service for hospital management with features like subscription management, appointment scheduling, and notification handling.
+A robust Node.js backend service for hospital management with features like appointment scheduling, and notification handling.
 
 ## 🚀 Tech Stack
 
@@ -114,12 +114,6 @@ SMTP_PASSWORD=your-app-specific-password
 - `POST /api/hospitals/verify-edit-otp`: Verify edit OTP
 - `PUT /api/hospitals/update`: Update hospital details
 
-#### 📊 Subscription Management
-- `GET /api/subscriptions/plans`: List all subscription plans
-- `POST /api/subscriptions/plans`: Create new plan (Super Admin)
-- `PUT /api/subscriptions/plans/:id`: Update plan (Super Admin)
-- `DELETE /api/subscriptions/plans/:id`: Delete plan (Super Admin)
-
 ### 🔐 Authentication & Authorization
 
 - Supabase authentication integration
@@ -143,19 +137,14 @@ Key data models in the system:
    - Basic information
    - Contact details
    - Branding (logo, theme)
-   - Subscription management
 
-2. **Subscription Plans**
-   - Pricing tiers
-   - Feature limits
-   - Duration options
 
-3. **Doctor**
+2. **Doctor**
    - Personal information
    - Specialization
    - Schedule management
 
-4. **Appointments**
+3. **Appointments**
    - Scheduling
    - Status tracking
    - Notification management
@@ -163,7 +152,6 @@ Key data models in the system:
 ## 🔄 Caching Strategy
 
 - Redis-based caching for:
-  - Subscription plans
   - Hospital details
   - Session data
   - Rate limiting
@@ -173,7 +161,6 @@ Key data models in the system:
 - Appointment reminders
 - Email notifications
 - SMS notifications
-- Subscription updates
 
 ## 🛡️ Security Features
 

@@ -1,16 +1,12 @@
 const { prisma } = require('../../services/database.service');
 const otpService = require('../../services/otp.service');
 const hospitalValidator = require('./hospital.validator');
-const subscriptionService = require('../subscription/subscription.service');
 const messageService = require('../notification/message.service');
 const redisService = require('../../services/redis.service');
 const { utcToIst, istToUtc } = require('../../utils/timezone.util');
 const { 
   ALLOWED_UPDATE_FIELDS, 
   DEFAULT_THEME_COLOR,
-  LICENSE_WARNING_TYPES,
-  DOCTOR_LIMIT_WARNING_THRESHOLD,
-  SUBSCRIPTION_EXPIRY_WARNING_DAYS,
   ALLOWED_ADDRESS_UPDATE_FIELDS,
   ALLOWED_CONTACT_INFO
 } = require('./hospital.constants');
@@ -76,9 +72,6 @@ class HospitalService {
             }
           });
 
-          // Initialize with basic subscription
-          const subscription = await subscriptionService.createSubscription(tx, hospital.id, 1, 'MONTHLY');
-
           // Define email type for welcome message
           const emailType = 'Hospital';
           
@@ -88,7 +81,6 @@ class HospitalService {
             subject: 'Welcome to Tiqora',
             hospitalId: hospital.id,
             metadata: {
-              subscriptionId: subscription.id,
               emailType: `Welcome${emailType.toLowerCase()}`,
               timestamp: new Date().toISOString()
             },
@@ -120,22 +112,12 @@ class HospitalService {
                   ` : ''
                 }
               </div>
-
-              <div style="background-color: #f9fafb; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #e5e7eb;">
-                <p style="margin: 0 0 10px 0; font-size: 16px;"><strong>Your Initial Subscription Details:</strong></p>
-                <ul style="margin: 0 0 10px 20px; font-size: 16px; padding-left: 20px;">
-                  <li>Doctors Allowed: ${subscription.doctorCount}</li>
-                  <li>Valid until: ${subscription.endDate.toLocaleDateString()}</li>
-                </ul>
-                <p style="font-style: italic; color: #6b7280; font-size: 15px;">You can upgrade your subscription anytime from the dashboard.</p>
-              </div>
-
-              <p style="font-size: 16px; color: #111827;">To upgrade your subscription or manage your hospital, visit your hospital dashboard.</p>
+              <p style="font-size: 16px; color: #111827;"> To manage your hospital, visit your hospital dashboard.</p>
             </div>
             `
           });
 
-          return {...hospital, subscription};
+          return {...hospital};
         } catch (txError) {
           // Log transaction-specific errors
           console.error('Transaction error in createHospital:', txError);
@@ -474,8 +456,6 @@ class HospitalService {
       const [
         appointments,
         doctors,
-        subscription,
-        subscriptionHistory,
         hospitalDetails,
       ] = await Promise.all([
         // All appointments in last 30 days
@@ -510,31 +490,6 @@ class HospitalService {
           console.error('Error fetching doctors:', err);
           return []; // Return empty array on failure
         }),
-        
-        // Current subscription
-        prisma.hospitalSubscription.findFirst({
-          where: { 
-            hospitalId, 
-            status: 'ACTIVE',
-            endDate: {
-              gt: new Date()
-            }
-          }
-        }).catch(err => {
-          console.error('Error fetching subscription:', err);
-          return null; // Return null on failure
-        }),
-        
-        // Subscription history
-        prisma.subscriptionHistory.findMany({
-          where: { hospitalId },
-          orderBy: { createdAt: 'desc' },
-          take: 12 // Last 12 entries
-        }).catch(err => {
-          console.error('Error fetching subscription history:', err);
-          return []; // Return empty array on failure
-        }),
-        
         // Hospital details
         prisma.hospital.findUnique({
           where: { id: hospitalId }
@@ -594,21 +549,6 @@ class HospitalService {
         operationalAnalytics = { error: 'Failed to calculate operational analytics' };
       }
 
-      // Calculate subscription analytics with defensive programming
-      let subscriptionAnalytics = {};
-      try {
-        subscriptionAnalytics = {
-          currentStatus: subscription,
-          subscriptionUsage:await subscriptionService.calculateRemainingAmount(subscription),
-          history: this.analyzeSubscriptionHistory(subscriptionHistory),
-          doctorTrends: this.analyzeDoctorCountTrends(subscriptionHistory),
-          billingPerformance: this.analyzeBillingCyclePerformance(subscriptionHistory)
-        };
-      } catch (subscriptionError) {
-        console.error('Error calculating subscription analytics:', subscriptionError);
-        subscriptionAnalytics = { error: 'Failed to calculate subscription analytics' };
-      }
-
       // Calculate patient experience analytics with defensive programming
       let experienceAnalytics = {};
       try {
@@ -629,7 +569,6 @@ class HospitalService {
         appointment: appointmentAnalytics,
         revenue: revenueAnalytics,
         operational: operationalAnalytics,
-        subscription: subscriptionAnalytics,
         patientExperience: experienceAnalytics
       };
 
@@ -1112,47 +1051,6 @@ class HospitalService {
     };
   }
 
-  checkSubscriptionWarnings(subscription) {
-    const warnings = [];
-    
-    if (!subscription) {
-      return [{
-        type: LICENSE_WARNING_TYPES.NO_SUBSCRIPTION,
-        message: 'No active subscription found'
-      }];
-    }
-
-    const today = new Date();
-    const endDate = new Date(subscription.endDate);
-    const daysUntilExpiry = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
-
-    // Check expiry warning
-    if (daysUntilExpiry <= SUBSCRIPTION_EXPIRY_WARNING_DAYS) {
-      warnings.push({
-        type: LICENSE_WARNING_TYPES.EXPIRING_SOON,
-        message: `Subscription expires in ${daysUntilExpiry} days`,
-        daysRemaining: daysUntilExpiry
-      });
-    }
-
-    // Check doctor limit warning
-    const doctorLimit = subscription.doctorCount;
-    const currentDoctorCount = subscription.currentDoctorCount || 0;
-    const limitThreshold = (currentDoctorCount / doctorLimit) * 100;
-
-    if (limitThreshold >= DOCTOR_LIMIT_WARNING_THRESHOLD) {
-      warnings.push({
-        type: LICENSE_WARNING_TYPES.DOCTOR_LIMIT,
-        message: `Doctor limit threshold reached (${Math.round(limitThreshold)}% of ${doctorLimit} doctors)`,
-        currentCount: currentDoctorCount,
-        limit: doctorLimit,
-        usagePercentage: limitThreshold
-      });
-    }
-
-    return warnings;
-  }
-
   analyzeWaitTimes(appointments) {
     const waitTimes = appointments
       .filter(apt => apt.status === 'COMPLETED' && apt.scheduledStartTime && apt.actualStartTime)
@@ -1190,152 +1088,6 @@ class HospitalService {
       maxWaitTime,
       distribution,
       totalSamples: waitTimes.length
-    };
-  }
-
-  analyzeSubscriptionHistory(subscriptionHistory) {
-    if (!subscriptionHistory || subscriptionHistory.length === 0) {
-      return {
-        upgrades: 0,
-        downgrades: 0,
-        renewals: 0,
-        totalTransactions: 0,
-        history: []
-      };
-    }
-
-    // Sort by date to analyze transitions
-    const sortedHistory = [...subscriptionHistory].sort((a, b) => 
-      new Date(a.createdAt) - new Date(b.createdAt)
-    );
-
-    let upgrades = 0;
-    let downgrades = 0;
-    let renewals = 0;
-
-    for (let i = 1; i < sortedHistory.length; i++) {
-      const prev = sortedHistory[i - 1];
-      const curr = sortedHistory[i];
-
-      if (curr.doctorCount > prev.doctorCount) {
-        upgrades++;
-      } else if (curr.doctorCount < prev.doctorCount) {
-        downgrades++;
-      } else {
-        renewals++;
-      }
-    }
-
-    const history = sortedHistory.map(sub => ({
-      id: sub.id,
-      subscriptionId: sub.subscriptionId,
-      hospitalId: sub.hospitalId,
-      doctorCount: sub.doctorCount,
-      billingCycle: sub.billingCycle,
-      totalPrice: sub.totalPrice,
-      startDate: sub.startDate,
-      endDate: sub.endDate,
-      paymentStatus: sub.paymentStatus,
-      paymentMethod: sub.paymentMethod,
-      // Simplified payment details
-      paymentDetails: sub.paymentDetails ? {
-        id: sub.paymentDetails.id,
-        amount: sub.paymentDetails.amount,
-        method: sub.paymentDetails.method,
-        status: sub.paymentDetails.status,
-        email: sub.paymentDetails.email,
-        contact: sub.paymentDetails.contact,
-      } : null,
-      createdAt: sub.createdAt
-    }));
-
-    return {
-      upgrades,
-      downgrades,
-      renewals,
-      totalTransactions: sortedHistory.length,
-      history
-    };
-  }
-
-  analyzeDoctorCountTrends(subscriptionHistory) {
-    if (!subscriptionHistory || subscriptionHistory.length === 0) {
-      return {
-        trend: 'NO_DATA',
-        growth: 0,
-        timeline: []
-      };
-    }
-
-    const sortedHistory = [...subscriptionHistory].sort((a, b) => 
-      new Date(a.createdAt) - new Date(b.createdAt)
-    );
-
-    const timeline = sortedHistory.map(sub => ({
-      date: sub.createdAt,
-      doctorCount: sub.doctorCount
-    }));
-
-    const firstCount = sortedHistory[0].doctorCount;
-    const lastCount = sortedHistory[sortedHistory.length - 1].doctorCount;
-    const growth = ((lastCount - firstCount) / firstCount) * 100;
-
-    let trend = 'STABLE';
-    if (growth > 10) trend = 'GROWING';
-    if (growth < -10) trend = 'DECLINING';
-
-    return {
-      trend,
-      growth,
-      timeline,
-      currentCount: lastCount,
-      initialCount: firstCount,
-      maxCount: Math.max(...sortedHistory.map(s => s.doctorCount)),
-      minCount: Math.min(...sortedHistory.map(s => s.doctorCount))
-    };
-  }
-
-  analyzeBillingCyclePerformance(subscriptionHistory) {
-    if (!subscriptionHistory || subscriptionHistory.length === 0) {
-      return {
-        cycleDistribution: {},
-        renewalRate: 0,
-        averageCycleDuration: 0
-      };
-    }
-
-    const cycleDistribution = subscriptionHistory.reduce((acc, sub) => {
-      const cycle = sub.billingCycle || 'UNKNOWN';
-      acc[cycle] = (acc[cycle] || 0) + 1;
-      return acc;
-    }, {});
-
-    // Calculate renewal rate
-    const totalPossibleRenewals = subscriptionHistory.length - 1;
-    const actualRenewals = subscriptionHistory.filter(sub => sub.renewedFromId).length;
-    const renewalRate = totalPossibleRenewals > 0 ? 
-      (actualRenewals / totalPossibleRenewals) * 100 : 0;
-
-    // Calculate average cycle duration
-    const cycleDurations = subscriptionHistory
-      .filter(sub => sub.startDate && sub.endDate)
-      .map(sub => {
-        const start = new Date(sub.startDate);
-        const end = new Date(sub.endDate);
-        return (end - start) / (1000 * 60 * 60 * 24); // Convert to days
-      });
-
-    const averageCycleDuration = cycleDurations.length > 0 ?
-      cycleDurations.reduce((sum, duration) => sum + duration, 0) / cycleDurations.length : 0;
-
-    return {
-      cycleDistribution,
-      renewalRate,
-      averageCycleDuration,
-      totalSubscriptions: subscriptionHistory.length,
-      successfulRenewals: actualRenewals,
-      cyclePreference: Object.entries(cycleDistribution)
-        .sort(([,a], [,b]) => b - a)[0]?.[0] || 'UNKNOWN'
     };
   }
 
