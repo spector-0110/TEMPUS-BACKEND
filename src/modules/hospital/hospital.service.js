@@ -428,7 +428,6 @@ class HospitalService {
     }
   }
 
-
   async getDashboardStats(hospitalId) {
     try {
       if (!hospitalId) {
@@ -452,57 +451,67 @@ class HospitalService {
       const thirtyDaysAgo = new Date(today);
       thirtyDaysAgo.setDate(today.getDate() - 30);
 
-      // Use Promise.all with individual try/catch blocks for better error handling
-      const [
-        appointments,
-        doctors,
-        hospitalDetails,
-      ] = await Promise.all([
-        // All appointments in last 30 days
-        prisma.appointment.findMany({
-          where: { 
-            hospitalId,
-            createdAt: {
-              gte: thirtyDaysAgo
-            }
-          },
-          include: {
-            doctor: {
-              select: {
-                id: true,
-                name: true,
-                specialization: true
+      // Single optimized query to fetch all required data in one database call
+      const hospitalWithAllData = await prisma.hospital.findUnique({
+        where: { id: hospitalId },
+        include: {
+          // Fetch doctors with schedules and their appointments
+          doctors: {
+            include: {
+              schedules: true,
+              appointments: {
+                where: {
+                  createdAt: {
+                    gte: thirtyDaysAgo
+                  }
+                }
               }
             }
-          }
-        }).catch(err => {
-          console.error('Error fetching appointments:', err);
-          return []; // Return empty array on failure
-        }),
-        
-        // All doctors with their schedules
-        prisma.doctor.findMany({
-          where: { hospitalId },
-          include: {
-            schedules: true
-          }
-        }).catch(err => {
-          console.error('Error fetching doctors:', err);
-          return []; // Return empty array on failure
-        }),
-        // Hospital details
-        prisma.hospital.findUnique({
-          where: { id: hospitalId }
-        }).catch(err => {
-          console.error('Error fetching hospital details:', err);
-          throw new Error('Hospital not found'); // Critical failure
-        }),
-      ]);
+          },
+          // Fetch all appointments in last 30 days with doctor info
+          appointments: {
+            where: {
+              createdAt: {
+                gte: thirtyDaysAgo
+              }
+            },
+            include: {
+              doctor: {
+                select: {
+                  id: true,
+                  name: true,
+                  specialization: true
+                }
+              }
+            }
+          },
+        }
+      });
 
       // Check if hospital exists
-      if (!hospitalDetails) {
+      if (!hospitalWithAllData) {
         throw new Error('Hospital not found');
       }
+
+      // Extract data from the single query result
+      const hospitalDetails = {
+        id: hospitalWithAllData.id,
+        supabaseUserId: hospitalWithAllData.supabaseUserId,
+        name: hospitalWithAllData.name,
+        subdomain: hospitalWithAllData.subdomain,
+        adminEmail: hospitalWithAllData.adminEmail,
+        gstin: hospitalWithAllData.gstin,
+        address: hospitalWithAllData.address,
+        contactInfo: hospitalWithAllData.contactInfo,
+        logo: hospitalWithAllData.logo,
+        themeColor: hospitalWithAllData.themeColor,
+        establishedDate: hospitalWithAllData.establishedDate,
+        createdAt: hospitalWithAllData.createdAt,
+        updatedAt: hospitalWithAllData.updatedAt
+      };
+      
+      const appointments = hospitalWithAllData.appointments || [];
+      const doctors = hospitalWithAllData.doctors || [];
 
       // Calculate analytics with defensive programming
       let appointmentAnalytics = {};
