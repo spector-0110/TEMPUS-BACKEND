@@ -7,6 +7,7 @@ const { testConnection, disconnect } = require('./src/services/database.service'
 const hospitalRoutes = require('./src/routes/hospital.routes');
 // const patientRoutes = require('./src/routes/patient.routes');
 const doctorRoutes = require('./src/routes/doctor.routes');
+const staffRoutes = require('./src/routes/staff.route');
 const appointmentRoutes = require('./src/routes/appointment.route');
 const appointmentProcessor = require('./src/modules/appointment/appointmentProcessor');
 const websocketService = require('./src/services/websocket.service');
@@ -87,6 +88,7 @@ app.use('/api/hospitals', hospitalRoutes);
 // app.use('/api/patients', patientRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/staff', staffRoutes);
 
 // Basic route
 app.get('/api', (req, res) => {
