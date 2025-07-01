@@ -236,12 +236,6 @@ class StaffService {
                 status: true,
                 attendanceDate: true
               }
-            },
-            _count: {
-              select: {
-                attendances: true,
-                payments: true
-              }
             }
           },
           orderBy: {
