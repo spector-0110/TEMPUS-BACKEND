@@ -71,7 +71,7 @@ class WebSocketService {
       // Verify token and get appointment details
       let decodedToken;
       try {
-        decodedToken = trackingUtil.verifyToken(token);
+        decodedToken = await trackingUtil.verifyToken(token);
         
         if (!decodedToken || !decodedToken.appointmentId || !decodedToken.hospitalId || !decodedToken.doctorId) {
           socket.emit('error', { message: 'Token is missing required fields' });

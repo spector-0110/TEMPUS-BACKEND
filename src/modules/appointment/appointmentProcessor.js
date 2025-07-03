@@ -36,7 +36,6 @@ class AppointmentProcessor {
       await this.setupConsumers();
       
       this.initialized = true;
-      console.log('Appointment processor initialized successfully');
     } catch (error) {
       console.error('Failed to initialize appointment processor:', error);
     }
@@ -73,10 +72,9 @@ class AppointmentProcessor {
     // Consumer for appointment created events
     await rabbitmqService.consumeQueue(QUEUES.APPOINTMENT_CREATED, async (message) => {
       try {
-        console.log('Processing appointment creation:', message.appointment.id);
         
         // Send welcome notification with tracking link
-        await this.sendAppointmentCreationNotification(message.appointment, message.trackingLink);
+        await this.sendAppointmentCreationNotification(message.appointment, message.trackingLink, message.uploadDocumentLink);
         
         // Invalidate any relevant cached lists
         await this.invalidateAppointmentCaches(message.appointment);
@@ -89,7 +87,6 @@ class AppointmentProcessor {
     // Consumer for appointment updated events
     await rabbitmqService.consumeQueue(QUEUES.APPOINTMENT_UPDATED, async (message) => {
       try {
-        console.log('Processing appointment update:', message.appointment.id);
         
         // Handle status updates
         if (message.previousStatus && message.appointment.status !== message.previousStatus) {
@@ -117,7 +114,6 @@ class AppointmentProcessor {
     // Consumer for appointment notification events
     await rabbitmqService.consumeQueue(QUEUES.APPOINTMENT_NOTIFICATION, async (message) => {
       try {
-        console.log('Processing appointment notification:', message.appointmentId);
         
         // Send WhatsApp notification if configured
         await this.sendNotification(message);
@@ -130,39 +126,29 @@ class AppointmentProcessor {
   
   async handleStatusChange(appointment, previousStatus) {
     try {
-      // Generate appropriate messages based on status change
-      let notificationContent = '';
+      // Generate appropriate messages based on status change - COMMENTED OUT TO DISABLE WHATSAPP ON STATUS CHANGE
+      // let notificationContent = '';
       
-      if (appointment.status === APPOINTMENT_STATUS.CANCELLED) {
-        notificationContent = this.generateCancellationMessage(appointment, previousStatus);
-      } else if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
-        notificationContent = this.generateCompletionMessage(appointment);
-        
-        // // Update queue positions after completion
-        // await appointmentService.updateQueuePositions(
-        //   appointment.hospitalId,
-        //   appointment.doctorId,
-        //   appointment.appointmentDate
-        // );
-
-        // Notify next patient
-        // await this.notifyNextPatientInQueue(appointment.hospitalId, appointment.doctorId);
-      } else if (appointment.status === APPOINTMENT_STATUS.MISSED) {
-        notificationContent = this.generateMissedAppointmentMessage(appointment);
-      } else if (appointment.status === APPOINTMENT_STATUS.BOOKED && previousStatus !== APPOINTMENT_STATUS.BOOKED) {
-        notificationContent = this.generateRebookedMessage(appointment, previousStatus);
-      }
+      // if (appointment.status === APPOINTMENT_STATUS.CANCELLED) {
+      //   notificationContent = this.generateCancellationMessage(appointment, previousStatus);
+      // } else if (appointment.status === APPOINTMENT_STATUS.COMPLETED) {
+      //   notificationContent = this.generateCompletionMessage(appointment);
+      // } else if (appointment.status === APPOINTMENT_STATUS.MISSED) {
+      //   notificationContent = this.generateMissedAppointmentMessage(appointment);
+      // } else if (appointment.status === APPOINTMENT_STATUS.BOOKED && previousStatus !== APPOINTMENT_STATUS.BOOKED) {
+      //   notificationContent = this.generateRebookedMessage(appointment, previousStatus);
+      // }
       
-      if (notificationContent) {
-        await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
-          appointmentId: appointment.id,
-          name: appointment.patientName,
-          mobile: appointment.mobile,
-          hospitalId: appointment.hospitalId,
-          content: notificationContent
-        });
-      }
-      
+      // if (notificationContent) {
+      //   await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
+      //     appointmentId: appointment.id,
+      //     name: appointment.patientName,
+      //     mobile: appointment.mobile,
+      //     hospitalId: appointment.hospitalId,
+      //     content: notificationContent
+      //   });
+      // }
+            
       // Clear any tracking caches to ensure data is fresh
       await this.invalidateAppointmentCaches(appointment);
 
@@ -227,19 +213,21 @@ class AppointmentProcessor {
 
   async handlePaymentStatusChange(appointment) {
     try {
-      // Generate notification if needed
-      if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID) {
-        const notificationContent = this.generatePaymentConfirmationMessage(appointment);
+      // Generate notification if needed - COMMENTED OUT TO DISABLE WHATSAPP ON PAYMENT STATUS CHANGE
+      // if (appointment.paymentStatus === APPOINTMENT_PAYMENT_STATUS.PAID) {
+      //   const notificationContent = this.generatePaymentConfirmationMessage(appointment);
         
-        // Queue notification
-        await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
-          appointmentId: appointment.id,
-          name: appointment.patientName,
-          mobile: appointment.mobile,
-          hospitalId: appointment.hospitalId,
-          content: notificationContent
-        });
-      }
+      //   // Queue notification
+      //   await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
+      //     appointmentId: appointment.id,
+      //     name: appointment.patientName,
+      //     mobile: appointment.mobile,
+      //     hospitalId: appointment.hospitalId,
+      //     content: notificationContent
+      //   });
+      // }
+      
+      console.log(`Payment status changed for appointment: ${appointment.id} - No WhatsApp notification sent`);
     } catch (error) {
       console.error('Error handling payment status change:', error);
     }
@@ -247,17 +235,19 @@ class AppointmentProcessor {
 
   async handleAppointmentDeletion(appointment) {
     try {      
-      // Send cancellation notification
-      const notificationContent = this.generateDeletionMessage(appointment);
+      // Send cancellation notification - COMMENTED OUT TO DISABLE WHATSAPP ON DELETION
+      // const notificationContent = this.generateDeletionMessage(appointment);
       
-      // Queue notification
-      await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
-        appointmentId: appointment.id,
-        name: appointment.patientName,
-        mobile: appointment.mobile,
-        hospitalId: appointment.hospitalId,
-        content: notificationContent
-      });
+      // Queue notification - COMMENTED OUT TO DISABLE WHATSAPP ON DELETION
+      // await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_NOTIFICATION, {
+      //   appointmentId: appointment.id,
+      //   name: appointment.patientName,
+      //   mobile: appointment.mobile,
+      //   hospitalId: appointment.hospitalId,
+      //   content: notificationContent
+      // });
+      
+      console.log(`Appointment deleted: ${appointment.id} - No WhatsApp notification sent`);
     } catch (error) {
       console.error('Error handling appointment deletion:', error);
     }
@@ -279,12 +269,10 @@ class AppointmentProcessor {
     }
   }
 
-  async sendAppointmentCreationNotification(appointment, trackingLink) {
+  async sendAppointmentCreationNotification(appointment, trackingLink,uploadDocumentLink) {
     try {
       // Construct the WhatsApp message
-      const notificationContent = this.generateCreationMessage(appointment, trackingLink);
-      console.log(`Appointment creation notification  ${appointment.mobile} for appointment ${appointment.id} ${notificationContent }`);
-
+      const notificationContent = this.generateCreationMessage(appointment, trackingLink,uploadDocumentLink);
       // Send WhatsApp message
       await messageService.sendMessage('whatsapp', {
         to: appointment.mobile,
@@ -300,7 +288,6 @@ class AppointmentProcessor {
 
   async sendNotification(message) {
     try {
-      console.log(`Sending notification for appointment ${message}`);
       // Send WhatsApp notification
       await messageService.sendMessage('whatsapp', {
         to: message.mobile,
@@ -315,7 +302,7 @@ class AppointmentProcessor {
   /**
    * Generate professional appointment creation message
    */
-  generateCreationMessage(appointment, trackingLink) {
+  generateCreationMessage(appointment, trackingLink,uploadDocumentLink) {
     const appointmentDate = appointment.appointmentDate;
     const startTime = appointment.startTime ? new Date(appointment.startTime).toISOString().split('T')[1].split('.')[0] : 'TBD';
     const endTime = appointment.endTime ? new Date(appointment.endTime).toISOString().split('T')[1].split('.')[0] : '';
@@ -356,7 +343,7 @@ Dear ${appointment.patientName},
 Your appointment has been successfully booked!
 
 📋 APPOINTMENT DETAILS:
-• Date: ${appointmentDate}
+• Date: ${appointmentDate.split('T')[0]}
 • Time: ${startTime}${endTime ? ` - ${endTime}` : ''}
 • Patient Name: ${appointment.patientName}
 • Mobile: ${appointment.mobile}
@@ -364,10 +351,11 @@ ${appointment.age ? `• Age: ${appointment.age} years` : ''}
 
 ${doctorInfo}
 
-${paymentInfo}
-
 🔗 TRACK YOUR APPOINTMENT:
 ${trackingLink}
+
+📄 UPLOAD DOCUMENTS:
+${uploadDocumentLink}
 
 📱 What you can do:
 • Check your position in the queue
@@ -375,9 +363,13 @@ ${trackingLink}
 • Get notified when it's your turn
 • View the full day's appointment schedule
 • Reschedule or cancel if needed
+• Upload your medical documents securely
 
 📍 Hospital Information:
 ${appointment.hospital.address ? JSON.stringify(appointment.hospital.address).replace(/[{}\"]/g, '') : 'Address available at hospital'}
+
+📞 Contact Information:
+${this.formatContactInfo(appointment.hospital.contactInfo)}
 
 We look forward to providing you with excellent healthcare services!
 
@@ -422,7 +414,7 @@ ${refundInfo}
 • You can book a new appointment through our system
 
 📱 Contact Information:
-${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Please contact hospital reception'}
+${this.formatContactInfo(appointment.hospital.contactInfo)}
 
 We apologize for any inconvenience caused and look forward to serving you in the future.`;
   }
@@ -476,7 +468,8 @@ You can book your next appointment through our system or contact the reception.
 
 Thank you for choosing ${appointment.hospital.name} for your healthcare needs. We wish you good health!
 
-For any medical queries, please contact: ${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Hospital reception'}`;
+For any medical queries, please contact:
+${this.formatContactInfo(appointment.hospital.contactInfo)}`;
   }
 
   /**
@@ -510,7 +503,7 @@ ${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.
 • Missing appointments may affect treatment continuity
 
 📱 Contact Information:
-${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Please contact hospital reception'}
+${this.formatContactInfo(appointment.hospital.contactInfo)}
 
 We care about your health and look forward to serving you soon.`;
   }
@@ -595,7 +588,8 @@ ${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.
 
 Thank you for choosing ${appointment.hospital.name}. We look forward to serving you!
 
-Contact: ${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Hospital reception'}`;
+Contact:
+${this.formatContactInfo(appointment.hospital.contactInfo)}`;
   }
 
   /**
@@ -633,7 +627,8 @@ ${appointment.doctor.specialization ? `• Specialization: ${appointment.doctor.
 ${refundInfo}
 
 📞 REBOOKING OPTIONS:
-• Contact hospital reception: ${appointment.hospital.contactInfo ? JSON.stringify(appointment.hospital.contactInfo).replace(/[{}\"]/g, '') : 'Available at hospital'}
+• Contact hospital reception:
+${this.formatContactInfo(appointment.hospital.contactInfo)}
 • Visit our online booking system
 • Walk-in consultation (subject to availability)
 
@@ -651,6 +646,32 @@ ${appointment.hospital.name}
 Your Health, Our Priority`;
   }
   
+  /**
+   * Format contact information for display
+   */
+  formatContactInfo(contactInfo) {
+    if (!contactInfo) {
+      return 'Hospital reception';
+    }
+    
+    let formattedContact = '';
+    
+    if (contactInfo.phone) {
+      formattedContact += `📱 Phone: ${contactInfo.phone}`;
+    }
+    
+    if (contactInfo.website) {
+      if (formattedContact) formattedContact += '\n';
+      formattedContact += `🌐 Website: ${contactInfo.website}`;
+    }
+    
+    if (contactInfo.email) {
+      if (formattedContact) formattedContact += '\n';
+      formattedContact += `📧 Email: ${contactInfo.email}`;
+    }
+    
+    return formattedContact || 'Hospital reception';
+  }
 }
 
 module.exports = new AppointmentProcessor();

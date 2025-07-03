@@ -24,6 +24,7 @@
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "luxon": "^3.6.1",
+    "nanoid": "^5.1.5",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.10.1",
     "prisma": "^6.6.0",

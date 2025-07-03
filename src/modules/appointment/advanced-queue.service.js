@@ -82,7 +82,7 @@ class AdvancedQueueService {
    */
   async _computeQueueInfo(token, bypassRedis = false) {
     // Verify and decode the token
-    const tokenData = trackingUtil.verifyToken(token);
+    const tokenData = await trackingUtil.verifyToken(token);
     
     if (!tokenData || !tokenData.appointmentId || !tokenData.hospitalId || !tokenData.doctorId) {
       throw new Error('Invalid tracking token structure');

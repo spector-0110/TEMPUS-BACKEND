@@ -12,6 +12,7 @@ router.post('/',verifySignature, appointmentController.createAppointment);
 router.delete('/:id', verifySignature,appointmentController.deleteAppointment);
 router.get('/public/:id', verifySignature, appointmentController.getAppointmentById);
 router.patch('/documents/:token', verifySignature, appointmentController.updateAppointmentDocuments);
+router.get('/verify_upload/:token', verifySignature, appointmentController.verifyUploadToken);
 
 // Protected endpoints - require authentication
 router.get('/history', authMiddleware, appointmentController.getAppointmentHistory);

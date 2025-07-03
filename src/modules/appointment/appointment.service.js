@@ -44,12 +44,15 @@ class AppointmentService {
       await this.cacheAppointment(appointment, appointmentData.hospitalId);
       
       // Generate tracking link
-      const trackingLink = trackingUtil.generateTrackingLink(appointment.id, appointment.hospitalId, appointment.doctorId);
+      const trackingLink = await trackingUtil.generateTrackingLink(appointment.id, appointment.hospitalId, appointment.doctorId);
+      const uploadDocumentLink = await trackingUtil.generateUploadLink(appointment.id, appointment.hospitalId, appointment.doctorId);
+
       
       // Publish to the appointment created queue with tracking link for notification
       await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_CREATED, { 
         appointment,
-        trackingLink
+        trackingLink,
+        uploadDocumentLink
       });
 
       // Purge all queues at once using the new utility method
@@ -109,16 +112,12 @@ class AppointmentService {
     // Update the appointment
     const appointment = await prisma.appointment.update({
       where: { id: appointmentId },
-      data: { status },
-      include: {
-        hospital: true,
-        doctor: true
-      }
+      data: { status }
     });
 
     // Generate document link only when appointment is completed
     if(status === APPOINTMENT_STATUS.COMPLETED) {
-      const uploadDocumentLink = trackingUtil.generateUploadLink(appointment.id, appointment.hospitalId, appointment.doctorId);
+      const uploadDocumentLink = await trackingUtil.generateUploadLink(appointment.id, appointment.hospitalId, appointment.doctorId);
       appointment.uploadDocumentLink = uploadDocumentLink;
     }
 
@@ -129,11 +128,11 @@ class AppointmentService {
     await queueService.publishQueueUpdate(appointment.hospitalId,appointment.doctorId, appointment.appointmentDate);
 
     
-    // Publish to the appointment updated queue
-    await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
-      appointment,
-      previousStatus: currentAppointment.status,
-    });
+    // // Publish to the appointment updated queue
+    // await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
+    //   appointment,
+    //   previousStatus: currentAppointment.status,
+    // });
     
     return appointment;
   }
@@ -153,10 +152,6 @@ class AppointmentService {
     const appointment = await prisma.appointment.update({
       where: { id: appointmentId },
       data: updateData,
-      include: {
-        hospital: true,
-        doctor: true
-      }
     });
     
     // Update cache
@@ -164,11 +159,11 @@ class AppointmentService {
 
     await queueService.publishQueueUpdate(appointment.hospitalId, appointment.doctorId, appointment.appointmentDate);
     
-    // Publish to the appointment updated queue
-    await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
-      appointment,
-      paymentStatusUpdated: true
-    });
+    // // Publish to the appointment updated queue
+    // await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
+    //   appointment,
+    //   paymentStatusUpdated: true
+    // });
     
     return appointment;
   }
@@ -188,11 +183,7 @@ class AppointmentService {
       // Update the appointment with new documents
       const appointment = await prisma.appointment.update({
         where: { id: appointmentId },
-        data: { documents },
-        include: {
-          hospital: true,
-          doctor: true
-        }
+        data: { documents }
       });
       
       // Update cache
@@ -345,11 +336,11 @@ class AppointmentService {
     // Clear from cache
     await redisService.deleteCache(`${CACHE.APPOINTMENT_PREFIX}${appointmentId}`);
     
-    // Publish to the appointment updated queue
-    await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
-      appointment,
-      deleted: true
-    });
+    // // Publish to the appointment updated queue
+    // await rabbitmqService.publishToQueue(QUEUES.APPOINTMENT_UPDATED, { 
+    //   appointment,
+    //   deleted: true
+    // });
     
     return { success: true, message: 'Appointment deleted successfully' };
   }
